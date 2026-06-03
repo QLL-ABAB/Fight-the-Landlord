@@ -77,30 +77,3 @@ def filter_type_12_serial_3_2(moves, rival_move):
         if my_rank > rival_rank:
             new_moves.append(move)
     return new_moves
-
-def filter_type_13_4_2(moves, rival_move):
-    rival_move.sort()
-    rival_rank = rival_move[2]
-    new_moves = list()
-    for move in moves:
-        move.sort()
-        my_rank = move[2]
-        if my_rank > rival_rank:
-            new_moves.append(move)
-    return new_moves
-
-def filter_type_14_4_22(moves, rival_move):
-    rival = collections.Counter(rival_move)
-    rival_rank = my_rank = 0
-    for k, v in rival.items():
-        if v == 4:
-            rival_rank = k
-    new_moves = list()
-    for move in moves:
-        mymove = collections.Counter(move)
-        for k, v in mymove.items():
-            if v == 4:
-                my_rank = k
-        if my_rank > rival_rank:
-            new_moves.append(move)
-    return new_moves

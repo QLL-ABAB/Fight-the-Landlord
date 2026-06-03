@@ -171,34 +171,6 @@ class MovesGener(object):
 
         return serial_3_2_moves
 
-    def gen_type_13_4_2(self):
-        four_cards = list()
-        for k, v in self.cards_dict.items():
-            if v == 4:
-                four_cards.append(k)
-
-        result = list()
-        for fc in four_cards:
-            cards_list = [k for k in self.cards_list if k != fc]
-            subcards = select(cards_list, 2)
-            for i in subcards:
-                result.append([fc]*4 + i)
-        return list(k for k, _ in itertools.groupby(result))
-
-    def gen_type_14_4_22(self):
-        four_cards = list()
-        for k, v in self.cards_dict.items():
-            if v == 4:
-                four_cards.append(k)
-
-        result = list()
-        for fc in four_cards:
-            cards_list = [k for k, v in self.cards_dict.items() if k != fc and v>=2]
-            subcards = select(cards_list, 2)
-            for i in subcards:
-                result.append([fc] * 4 + [i[0], i[0], i[1], i[1]])
-        return result
-
     # generate all possible moves from given cards
     def gen_moves(self):
         moves = []
@@ -214,6 +186,4 @@ class MovesGener(object):
         moves.extend(self.gen_type_10_serial_triple())
         moves.extend(self.gen_type_11_serial_3_1())
         moves.extend(self.gen_type_12_serial_3_2())
-        moves.extend(self.gen_type_13_4_2())
-        moves.extend(self.gen_type_14_4_22())
         return moves

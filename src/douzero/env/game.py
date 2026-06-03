@@ -242,14 +242,6 @@ class GameEnv(object):
             all_moves = mg.gen_type_12_serial_3_2(repeat_num=rival_move_len)
             moves = ms.filter_type_12_serial_3_2(all_moves, rival_move)
 
-        elif rival_move_type == md.TYPE_13_4_2:
-            all_moves = mg.gen_type_13_4_2()
-            moves = ms.filter_type_13_4_2(all_moves, rival_move)
-
-        elif rival_move_type == md.TYPE_14_4_22:
-            all_moves = mg.gen_type_14_4_22()
-            moves = ms.filter_type_14_4_22(all_moves, rival_move)
-
         if rival_move_type not in [md.TYPE_0_PASS,
                                    md.TYPE_4_BOMB, md.TYPE_5_KING_BOMB]:
             moves = moves + mg.gen_type_4_bomb() + mg.gen_type_5_king_bomb()

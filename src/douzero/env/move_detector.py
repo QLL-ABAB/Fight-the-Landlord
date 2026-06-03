@@ -50,7 +50,7 @@ def get_move_type(move):
         return {'type': TYPE_8_SERIAL_SINGLE, 'rank': move[0], 'len': len(move)}
 
     if move_size == 5:
-        if len(move_dict) == 2:
+        if sorted(move_dict.values()) == [2, 3]:
             return {'type': TYPE_7_3_2, 'rank': move[2]}
         else:
             return {'type': TYPE_15_WRONG}
@@ -58,15 +58,6 @@ def get_move_type(move):
     count_dict = collections.defaultdict(int)
     for c, n in move_dict.items():
         count_dict[n] += 1
-
-    if move_size == 6:
-        if (len(move_dict) == 2 or len(move_dict) == 3) and count_dict.get(4) == 1 and \
-                (count_dict.get(2) == 1 or count_dict.get(1) == 2):
-            return {'type': TYPE_13_4_2, 'rank': move[2]}
-
-    if move_size == 8 and (((len(move_dict) == 3 or len(move_dict) == 2) and
-            (count_dict.get(4) == 1 and count_dict.get(2) == 2)) or count_dict.get(4) == 2):
-        return {'type': TYPE_14_4_22, 'rank': max([c for c, n in move_dict.items() if n == 4])}
 
     mdkeys = sorted(move_dict.keys())
     if len(move_dict) == count_dict.get(2) and is_continuous_seq(mdkeys):

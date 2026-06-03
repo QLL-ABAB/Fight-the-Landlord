@@ -1,0 +1,36 @@
+# Python cache/build files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+
+# Local environments and editor files
+.venv/
+venv/
+env/
+.env
+.DS_Store
+*.swp
+
+# Training checkpoints and generated models
+qlearning_checkpoints/
+douzero_checkpoints/
+most_recent_model/
+*.ckpt
+*.pt
+*.pth
+
+# Generated data/results
+evaluate_results/
+eval_data.pkl
+*.pkl
+
+# Logs
+*.log
+logs/
+
