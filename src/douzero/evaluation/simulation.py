@@ -43,6 +43,26 @@ def load_card_play_models(card_play_model_path_dict):
 
             model_path = card_play_model_path_dict[position].split(":", 1)[1]
             players[position] = QLearningAgent(position, model_path)
+        elif isinstance(card_play_model_path_dict[position], str) and card_play_model_path_dict[position].startswith('search'):
+            from .search_agent import SearchAgent
+            
+            s = card_play_model_path_dict[position]
+            parts = s.split(':')
+            if len(parts) == 2 and parts[1].isdigit():
+                players[position] = SearchAgent(int(parts[1]))
+            else:
+                players[position] = SearchAgent()
+        elif isinstance(card_play_model_path_dict[position], str) and card_play_model_path_dict[position].startswith('expectimax'):
+            from .expectimax_agent import ExpectimaxAgent
+
+            s = card_play_model_path_dict[position]
+            parts = s.split(':')
+            if len(parts) == 3 and parts[1].isdigit() and parts[2].isdigit():
+                players[position] = ExpectimaxAgent(int(parts[1]), int(parts[2]))
+            elif len(parts) == 2 and parts[1].isdigit():
+                players[position] = ExpectimaxAgent(int(parts[1]))
+            else:
+                players[position] = ExpectimaxAgent()
         else:
             from .deep_agent import DeepAgent
 
