@@ -65,6 +65,12 @@ PYTHONPATH=src python src/train_qlearning.py \
 
 注意：`train_qlearning_gpu.sh` 会设置 CUDA 可见设备并打印 CUDA 状态，但当前 Q-learning 是表格方法，核心更新逻辑主要仍然跑在 CPU 上。
 
+默认中间 checkpoint 每 `50000` 局保存一次，训练结束时仍会保存最终模型。如果需要临时调整保存频率，可以设置：
+
+```bash
+SAVE_INTERVAL=10000 TASK_NAME=qlearning_wp_10k EPISODES=50000 ./src/train_qlearning_gpu.sh
+```
+
 ## 评测
 
 固定地主模式：第一个方法固定做地主，另外两个方法做农民。

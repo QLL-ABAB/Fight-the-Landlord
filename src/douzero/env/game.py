@@ -2,6 +2,8 @@ from copy import deepcopy
 from . import move_detector as md, move_selector as ms
 from .move_generator import MovesGener
 
+POSITIONS = ['landlord', 'landlord_up', 'landlord_down']
+
 EnvCard2RealCard = {3: '3', 4: '4', 5: '5', 6: '6', 7: '7',
                     8: '8', 9: '9', 10: '10', 11: 'J', 12: 'Q',
                     13: 'K', 14: 'A', 17: '2', 20: 'X', 30: 'D'}
@@ -52,6 +54,7 @@ class GameEnv(object):
 
         self.bomb_num = 0
         self.last_pid = 'landlord'
+        self.available_move_infos = {pos: [] for pos in POSITIONS}
 
     def card_play_init(self, card_play_data):
         self.info_sets['landlord'].player_hand_cards = \
@@ -61,6 +64,7 @@ class GameEnv(object):
         self.info_sets['landlord_down'].player_hand_cards = \
             card_play_data['landlord_down']
         self.three_landlord_cards = card_play_data['three_landlord_cards']
+        self.init_available_move_cache()
         self.get_acting_player_position()
         self.game_infoset = self.get_infoset()
 
@@ -173,10 +177,101 @@ class GameEnv(object):
                 self.info_sets[
                     self.acting_player_position].player_hand_cards.remove(card)
             self.info_sets[self.acting_player_position].player_hand_cards.sort()
+            self.prune_available_move_cache(self.acting_player_position)
+
+    #note: 将动作排序后转成 tuple，便于去重和作为缓存中的稳定表示。
+    @staticmethod
+    def move_key(move):
+        return tuple(sorted(move))
+
+    #note: 统计一组牌里每种牌出现的次数，用于判断缓存动作是否仍能由当前手牌组成。
+    @staticmethod
+    def card_counts(cards):
+        counts = {}
+        for card in cards:
+            counts[card] = counts.get(card, 0) + 1
+        return counts
+
+    #note: 把动作的牌数统计转成不可变结构，避免后续反复重新统计同一个动作。
+    @classmethod
+    def move_count_items(cls, move):
+        return tuple(sorted(cls.card_counts(move).items()))
+
+    #note: 检查某个缓存动作需要的牌数是否都不超过当前手牌持有数量。
+    @staticmethod
+    def move_fits_hand(move_count_items, hand_counts):
+        for card, count in move_count_items:
+            if hand_counts.get(card, 0) < count:
+                return False
+        return True
+
+    #note: 每局开始时用初始手牌生成一次动作全集，并记录动作类型、长度和牌数统计。
+    def build_move_infos(self, hand_cards):
+        moves = MovesGener(hand_cards).gen_moves()
+        move_infos = []
+        seen = set()
+        for move in moves:
+            move = self.move_key(move)
+            if move in seen:
+                continue
+            seen.add(move)
+            move_type = md.get_move_type(list(move))
+            if move_type['type'] == md.TYPE_15_WRONG:
+                continue
+            move_infos.append({
+                'move': move,
+                'type': move_type['type'],
+                'len': move_type.get('len', 1),
+                'counts': self.move_count_items(move),
+            })
+        return move_infos
+
+    #note: 发牌后为三名玩家分别初始化局内合法动作缓存。
+    def init_available_move_cache(self):
+        self.available_move_infos = {}
+        for position in POSITIONS:
+            self.available_move_infos[position] = self.build_move_infos(
+                self.info_sets[position].player_hand_cards)
+
+    #note: 出牌后当前玩家手牌只会减少，因此从缓存中删掉已经无法组成的动作。
+    def prune_available_move_cache(self, position):
+        hand_counts = self.card_counts(
+            self.info_sets[position].player_hand_cards)
+        self.available_move_infos[position] = [
+            info for info in self.available_move_infos.get(position, [])
+            if self.move_fits_hand(info['counts'], hand_counts)
+        ]
+
+    #note: 获取当前玩家仍可能出的缓存动作；如果缓存为空则兜底重新生成。
+    def current_move_infos(self, position):
+        if not self.available_move_infos.get(position):
+            self.available_move_infos[position] = self.build_move_infos(
+                self.info_sets[position].player_hand_cards)
+        else:
+            self.prune_available_move_cache(position)
+        return self.available_move_infos[position]
+
+    #note: 从缓存中取指定牌型和长度的候选动作，再交给 move_selector 判断能否跟牌。
+    def moves_from_cache(self, position, move_type=None, move_len=None):
+        moves = []
+        for info in self.current_move_infos(position):
+            if move_type is not None and info['type'] != move_type:
+                continue
+            if move_len is not None and info['len'] != move_len:
+                continue
+            moves.append(list(info['move']))
+        return moves
+
+    #note: 从缓存中单独取炸弹和王炸，用于保留原来的炸弹压制逻辑。
+    def bomb_moves_from_cache(self, position):
+        moves = []
+        for info in self.current_move_infos(position):
+            if info['type'] in [md.TYPE_4_BOMB, md.TYPE_5_KING_BOMB]:
+                moves.append(list(info['move']))
+        return moves
 
     def get_legal_card_play_actions(self):
-        mg = MovesGener(
-            self.info_sets[self.acting_player_position].player_hand_cards)
+        position = self.acting_player_position
 
         action_sequence = self.card_play_action_seq
 
@@ -193,58 +288,63 @@ class GameEnv(object):
         moves = list()
 
         if rival_move_type == md.TYPE_0_PASS:
-            moves = mg.gen_moves()
+            moves = self.moves_from_cache(position)
 
         elif rival_move_type == md.TYPE_1_SINGLE:
-            all_moves = mg.gen_type_1_single()
-            moves = ms.filter_type_1_single(all_moves, rival_move)
+            all_moves = self.moves_from_cache(position, md.TYPE_1_SINGLE)
+            moves = ms.filter_type_1_single(all_moves, list(rival_move))
 
         elif rival_move_type == md.TYPE_2_PAIR:
-            all_moves = mg.gen_type_2_pair()
-            moves = ms.filter_type_2_pair(all_moves, rival_move)
+            all_moves = self.moves_from_cache(position, md.TYPE_2_PAIR)
+            moves = ms.filter_type_2_pair(all_moves, list(rival_move))
 
         elif rival_move_type == md.TYPE_3_TRIPLE:
-            all_moves = mg.gen_type_3_triple()
-            moves = ms.filter_type_3_triple(all_moves, rival_move)
+            all_moves = self.moves_from_cache(position, md.TYPE_3_TRIPLE)
+            moves = ms.filter_type_3_triple(all_moves, list(rival_move))
 
         elif rival_move_type == md.TYPE_4_BOMB:
-            all_moves = mg.gen_type_4_bomb() + mg.gen_type_5_king_bomb()
-            moves = ms.filter_type_4_bomb(all_moves, rival_move)
+            all_moves = self.bomb_moves_from_cache(position)
+            moves = ms.filter_type_4_bomb(all_moves, list(rival_move))
 
         elif rival_move_type == md.TYPE_5_KING_BOMB:
             moves = []
 
         elif rival_move_type == md.TYPE_6_3_1:
-            all_moves = mg.gen_type_6_3_1()
-            moves = ms.filter_type_6_3_1(all_moves, rival_move)
+            all_moves = self.moves_from_cache(position, md.TYPE_6_3_1)
+            moves = ms.filter_type_6_3_1(all_moves, list(rival_move))
 
         elif rival_move_type == md.TYPE_7_3_2:
-            all_moves = mg.gen_type_7_3_2()
-            moves = ms.filter_type_7_3_2(all_moves, rival_move)
+            all_moves = self.moves_from_cache(position, md.TYPE_7_3_2)
+            moves = ms.filter_type_7_3_2(all_moves, list(rival_move))
 
         elif rival_move_type == md.TYPE_8_SERIAL_SINGLE:
-            all_moves = mg.gen_type_8_serial_single(repeat_num=rival_move_len)
-            moves = ms.filter_type_8_serial_single(all_moves, rival_move)
+            all_moves = self.moves_from_cache(
+                position, md.TYPE_8_SERIAL_SINGLE, rival_move_len)
+            moves = ms.filter_type_8_serial_single(all_moves, list(rival_move))
 
         elif rival_move_type == md.TYPE_9_SERIAL_PAIR:
-            all_moves = mg.gen_type_9_serial_pair(repeat_num=rival_move_len)
-            moves = ms.filter_type_9_serial_pair(all_moves, rival_move)
+            all_moves = self.moves_from_cache(
+                position, md.TYPE_9_SERIAL_PAIR, rival_move_len)
+            moves = ms.filter_type_9_serial_pair(all_moves, list(rival_move))
 
         elif rival_move_type == md.TYPE_10_SERIAL_TRIPLE:
-            all_moves = mg.gen_type_10_serial_triple(repeat_num=rival_move_len)
-            moves = ms.filter_type_10_serial_triple(all_moves, rival_move)
+            all_moves = self.moves_from_cache(
+                position, md.TYPE_10_SERIAL_TRIPLE, rival_move_len)
+            moves = ms.filter_type_10_serial_triple(all_moves, list(rival_move))
 
         elif rival_move_type == md.TYPE_11_SERIAL_3_1:
-            all_moves = mg.gen_type_11_serial_3_1(repeat_num=rival_move_len)
-            moves = ms.filter_type_11_serial_3_1(all_moves, rival_move)
+            all_moves = self.moves_from_cache(
+                position, md.TYPE_11_SERIAL_3_1, rival_move_len)
+            moves = ms.filter_type_11_serial_3_1(all_moves, list(rival_move))
 
         elif rival_move_type == md.TYPE_12_SERIAL_3_2:
-            all_moves = mg.gen_type_12_serial_3_2(repeat_num=rival_move_len)
-            moves = ms.filter_type_12_serial_3_2(all_moves, rival_move)
+            all_moves = self.moves_from_cache(
+                position, md.TYPE_12_SERIAL_3_2, rival_move_len)
+            moves = ms.filter_type_12_serial_3_2(all_moves, list(rival_move))
 
         if rival_move_type not in [md.TYPE_0_PASS,
                                    md.TYPE_4_BOMB, md.TYPE_5_KING_BOMB]:
-            moves = moves + mg.gen_type_4_bomb() + mg.gen_type_5_king_bomb()
+            moves = moves + self.bomb_moves_from_cache(position)
 
         if len(rival_move) != 0:  # rival_move is not 'pass'
             moves = moves + [[]]
@@ -280,6 +380,7 @@ class GameEnv(object):
 
         self.bomb_num = 0
         self.last_pid = 'landlord'
+        self.available_move_infos = {pos: [] for pos in POSITIONS}
 
     def get_infoset(self):
         self.info_sets[

@@ -39,5 +39,7 @@ parser.add_argument("--max_steps", default=1000, type=int,
                     help="Safety cap for one game")
 parser.add_argument("--log_interval", default=100, type=int,
                     help="Print training stats every N episodes")
-parser.add_argument("--save_interval", default=1000, type=int,
+parser.add_argument("--progress_interval", default=100, type=int,
+                    help="Refresh the terminal progress bar every N episodes; 0 disables it")
+parser.add_argument("--save_interval", default=50000, type=int,
                     help="Save checkpoint every N episodes; 0 disables interim saves")

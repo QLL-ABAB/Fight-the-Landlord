@@ -1,13 +1,15 @@
 import os
 import pickle
 import random
-from collections import Counter, deque
+import time
+from collections import deque
 
 from douzero.env.game import GameEnv
 
 
 POSITIONS = ("landlord", "landlord_up", "landlord_down")
 CARD_RANKS = (3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 17, 20, 30)
+CARD_TO_INDEX = {card: index for index, card in enumerate(CARD_RANKS)}
 DEFAULT_QTABLE_PATH = "qlearning_checkpoints/qlearning/q_table.pkl"
 
 DECK = []
@@ -21,9 +23,14 @@ def action_key(action):
     return tuple(sorted(action))
 
 
+#note: 用固定 15 维数组统计手牌，替代 Counter 以降低高频状态编码开销。
 def cards_to_counts(cards):
-    counter = Counter(cards or [])
-    return tuple(counter.get(card, 0) for card in CARD_RANKS)
+    counts = [0] * len(CARD_RANKS)
+    for card in cards or []:
+        index = CARD_TO_INDEX.get(card)
+        if index is not None:
+            counts[index] += 1
+    return tuple(counts)
 
 
 def action_seq_key(actions):
@@ -133,6 +140,63 @@ def training_metadata(flags, global_episode, epsilon, load_path, total_steps,
         "savedir": flags.savedir,
         "resumed_from": load_path,
     }
+
+
+#note: 将秒数格式化成短时间字符串，供训练进度条显示 ETA。
+def format_duration(seconds):
+    seconds = max(0, int(seconds))
+    minutes, sec = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return "{}h{:02d}m".format(hours, minutes)
+    if minutes:
+        return "{}m{:02d}s".format(minutes, sec)
+    return "{}s".format(sec)
+
+
+#note: 打印单行训练进度条，展示进度、Q 表大小、速度和预计剩余时间。
+def print_progress_bar(episode, total_episodes, completed_episodes, qtable,
+                       epsilon, recent_steps, recent_landlord_wins,
+                       start_time, total_steps):
+    if total_episodes <= 0:
+        return
+
+    progress = episode / float(total_episodes)
+    width = 30
+    filled = int(width * progress)
+    bar = "#" * filled + "." * (width - filled)
+
+    elapsed = time.time() - start_time
+    speed = episode / elapsed if elapsed > 0 else 0.0
+    remaining = (total_episodes - episode) / speed if speed > 0 else 0.0
+    avg_steps = (
+        sum(recent_steps) / float(len(recent_steps)) if recent_steps else 0.0
+    )
+    landlord_wp = (
+        sum(recent_landlord_wins) / float(len(recent_landlord_wins))
+        if recent_landlord_wins else 0.0
+    )
+    global_episode = completed_episodes + episode
+
+    line = (
+        "\r[{}] {:6.2f}% episode={}/{} global={} q_size={} "
+        "epsilon={:.4f} landlord_wp={:.3f} avg_steps={:.1f} "
+        "speed={:.2f}eps/s steps={} eta={}"
+    ).format(
+        bar,
+        progress * 100.0,
+        episode,
+        total_episodes,
+        global_episode,
+        len(qtable.values),
+        epsilon,
+        landlord_wp,
+        avg_steps,
+        speed,
+        total_steps,
+        format_duration(remaining),
+    )
+    print(line + " " * 8, end="", flush=True)
 
 
 class QTable(object):
@@ -319,6 +383,9 @@ def train(flags):
     epsilon = flags.epsilon
     if load_path and "epsilon" in qtable.metadata:
         epsilon = float(qtable.metadata["epsilon"])
+    progress_enabled = bool(flags.progress_interval and flags.progress_interval > 0)
+    start_time = time.time()
+    last_steps = 0
 
     for episode in range(1, flags.episodes + 1):
         global_episode = completed_episodes + episode
@@ -349,10 +416,32 @@ def train(flags):
             recent_landlord_wins.append(0)
 
         recent_steps.append(steps)
+        last_steps = steps
         total_steps += steps
         epsilon = max(flags.min_epsilon, epsilon * flags.epsilon_decay)
 
-        if flags.log_interval and episode % flags.log_interval == 0:
+        should_log = flags.log_interval and episode % flags.log_interval == 0
+        should_save = flags.save_interval and episode % flags.save_interval == 0
+        should_progress = (
+            progress_enabled and
+            (
+                episode == 1 or
+                episode == flags.episodes or
+                episode % flags.progress_interval == 0 or
+                should_log or
+                should_save
+            )
+        )
+
+        if should_progress:
+            print_progress_bar(
+                episode, flags.episodes, completed_episodes, qtable, epsilon,
+                recent_steps, recent_landlord_wins, start_time, total_steps
+            )
+
+        if should_log:
+            if progress_enabled:
+                print()
             win_rate = sum(recent_landlord_wins) / float(len(recent_landlord_wins))
             avg_steps = sum(recent_steps) / float(len(recent_steps))
             print(
@@ -362,17 +451,22 @@ def train(flags):
                 )
             )
 
-        if flags.save_interval and episode % flags.save_interval == 0:
+        if should_save:
+            if progress_enabled and not should_log:
+                print()
             path = checkpoint_path(flags, global_episode)
             qtable.save(path, metadata=training_metadata(
                 flags, global_episode, epsilon, load_path, total_steps, steps
             ))
             print("saved Q table to {}".format(path))
 
+    if progress_enabled:
+        print()
+
     final_episode = completed_episodes + flags.episodes
     final_path = checkpoint_path(flags, final_episode)
     qtable.save(final_path, metadata=training_metadata(
-        flags, final_episode, epsilon, load_path, total_steps, steps
+        flags, final_episode, epsilon, load_path, total_steps, last_steps
     ))
     print("saved Q table to {}".format(final_path))
     return qtable

@@ -38,8 +38,9 @@
   - `EPISODES`
   - `RESUME=1`
   - `GPU_DEVICE`
+  - `SAVE_INTERVAL`
 
-  注意：当前 Q-learning 是表格方法，主要仍跑 CPU；脚本只是设置 CUDA 可见性并打印 CUDA 状态。
+  注意：当前 Q-learning 是表格方法，主要仍跑 CPU；脚本只是设置 CUDA 可见性并打印 CUDA 状态。默认中间 checkpoint 每 `50000` 局保存一次，频率是原来 `1000` 局一次的 `1/50`。
 
 - `src/douzero/evaluation/qlearning_agent.py`  
   Q-learning 评测 agent。支持：
@@ -129,4 +130,3 @@ PYTHONPATH=src python src/evaluate.py \
   --evaluate_name rotate_mdp_qlearning_rlcard \
   --eval_data src/eval_data.pkl
 ```
-
