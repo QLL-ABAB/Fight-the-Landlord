@@ -13,12 +13,12 @@ import random
 
 # ==================== 配置区域 ====================
 AGENT_CONFIG = {
-    "landlord": "mdp",  # 地主智能体
+    "landlord": "expectimax",  # 地主智能体
     "landlord_up": "rlcard",  # 地主上家智能体
-    "landlord_down": "random",  # 地主下家智能体
+    "landlord_down": "rlcard",  # 地主下家智能体
 }
 
-EVAL_DATA_PATH = "eval_data.pkl"
+EVAL_DATA_PATH = "src/eval_data.pkl"
 STEP_DELAY = 1.5
 SHOW_INITIAL_HAND = True
 # ==================================================

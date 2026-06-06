@@ -34,6 +34,10 @@ def load_card_play_models(card_play_model_path_dict):
             from .mdp_agent import BayesianMDPAgent
 
             players[position] = BayesianMDPAgent(position)
+        elif card_play_model_path_dict[position] == "adv":
+            from .adversarial_agent import AdversarialSearchAgent
+
+            players[position] = AdversarialSearchAgent(position)
         elif card_play_model_path_dict[position] == "qlearning":
             from .qlearning_agent import QLearningAgent
 

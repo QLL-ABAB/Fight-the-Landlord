@@ -11,21 +11,37 @@ from douzero.evaluation.simulation import evaluate
 #     "douzero_checkpoints/douzero/landlord_down_weights_1036800.ckpt",
 # ]
 
-method = ["mdp", "qlearning", "rlcard"]
+method = ["adv", "random", "random"]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("Dou Dizhu Evaluation")
     parser.add_argument("--landlord", type=str, default=method[0])
     parser.add_argument("--landlord_up", type=str, default=method[1])
     parser.add_argument("--landlord_down", type=str, default=method[2])
-    parser.add_argument("--methods", nargs=3, default=None,
-                        help="Three agents for fixed/rotate evaluation")
-    parser.add_argument("--eval_mode", choices=["fixed", "rotate"], default="fixed",
-                        help="fixed keeps the first method as landlord; rotate lets each method be landlord once")
-    parser.add_argument("--evaluate_name", type=str, default="evaluate",
-                        help="Name used for the saved evaluation JSON")
-    parser.add_argument("--result_dir", type=str, default="evaluate_results",
-                        help="Directory where evaluation JSON files are saved")
+    parser.add_argument(
+        "--methods",
+        nargs=3,
+        default=None,
+        help="Three agents for fixed/rotate evaluation",
+    )
+    parser.add_argument(
+        "--eval_mode",
+        choices=["fixed", "rotate"],
+        default="fixed",
+        help="fixed keeps the first method as landlord; rotate lets each method be landlord once",
+    )
+    parser.add_argument(
+        "--evaluate_name",
+        type=str,
+        default="evaluate",
+        help="Name used for the saved evaluation JSON",
+    )
+    parser.add_argument(
+        "--result_dir",
+        type=str,
+        default="evaluate_results",
+        help="Directory where evaluation JSON files are saved",
+    )
 
     parser.add_argument("--eval_data", type=str, default="eval_data.pkl")
     parser.add_argument("--num_workers", type=int, default=5)
