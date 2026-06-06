@@ -3,7 +3,7 @@ set -euo pipefail
 
 #note: 默认训练配置。常规修改优先改这里，外部环境变量仍可临时覆盖。
 GPU_DEVICE="${GPU_DEVICE:-0}"
-TASK_NAME="${TASK_NAME:-qlearning_wp_100k}"
+TASK_NAME="${TASK_NAME:-qlearning_wp_100k_shaped10}"
 EPISODES="${EPISODES:-100000}"
 SAVEDIR="${SAVEDIR:-qlearning_checkpoints/qlearning}"
 ALPHA="${ALPHA:-0.1}"
@@ -12,6 +12,8 @@ EPSILON="${EPSILON:-0.2}"
 MIN_EPSILON="${MIN_EPSILON:-0.02}"
 EPSILON_DECAY="${EPSILON_DECAY:-0.9995}"
 OBJECTIVE="${OBJECTIVE:-wp}"
+REWARD_SCALE="${REWARD_SCALE:-10}"
+REWARD_SHAPING="${REWARD_SHAPING:-1}"
 PROGRESS_INTERVAL="${PROGRESS_INTERVAL:-500}"
 LOG_INTERVAL="${LOG_INTERVAL:-10000}"
 SAVE_INTERVAL="${SAVE_INTERVAL:-50000}"
@@ -28,7 +30,7 @@ mkdir -p "$(dirname "${LOG_PATH}")"
 exec > >(tee -a "${LOG_PATH}") 2>&1
 
 echo "Training log: ${LOG_PATH}"
-echo "Task=${TASK_NAME} Episodes=${EPISODES} ProgressInterval=${PROGRESS_INTERVAL} LogInterval=${LOG_INTERVAL} SaveInterval=${SAVE_INTERVAL}"
+echo "Task=${TASK_NAME} Episodes=${EPISODES} RewardScale=${REWARD_SCALE} RewardShaping=${REWARD_SHAPING} ProgressInterval=${PROGRESS_INTERVAL} LogInterval=${LOG_INTERVAL} SaveInterval=${SAVE_INTERVAL}"
 
 python - <<'PY'
 try:
@@ -53,10 +55,15 @@ ARGS=(
   --min_epsilon "${MIN_EPSILON}"
   --epsilon_decay "${EPSILON_DECAY}"
   --objective "${OBJECTIVE}"
+  --reward_scale "${REWARD_SCALE}"
   --log_interval "${LOG_INTERVAL}"
   --progress_interval "${PROGRESS_INTERVAL}"
   --save_interval "${SAVE_INTERVAL}"
 )
+
+if [[ "${REWARD_SHAPING}" == "0" || "${REWARD_SHAPING}" == "false" || "${REWARD_SHAPING}" == "no" ]]; then
+  ARGS+=(--no_reward_shaping)
+fi
 
 if [[ -n "${OUTPUT}" ]]; then
   ARGS+=(--output "${OUTPUT}")

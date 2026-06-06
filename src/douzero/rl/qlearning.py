@@ -11,6 +11,13 @@ POSITIONS = ("landlord", "landlord_up", "landlord_down")
 CARD_RANKS = (3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 17, 20, 30)
 CARD_TO_INDEX = {card: index for index, card in enumerate(CARD_RANKS)}
 DEFAULT_QTABLE_PATH = "qlearning_checkpoints/qlearning/q_table.pkl"
+BOMB_ACTIONS = {
+    (3, 3, 3, 3), (4, 4, 4, 4), (5, 5, 5, 5),
+    (6, 6, 6, 6), (7, 7, 7, 7), (8, 8, 8, 8),
+    (9, 9, 9, 9), (10, 10, 10, 10), (11, 11, 11, 11),
+    (12, 12, 12, 12), (13, 13, 13, 13), (14, 14, 14, 14),
+    (17, 17, 17, 17), (20, 30),
+}
 
 DECK = []
 for _card in range(3, 15):
@@ -76,18 +83,103 @@ def generate_card_play_data(rng):
     return card_play_data
 
 
-def reward_for_position(position, winner, bomb_num, objective):
+#note: 终局奖励仍以胜负为主，reward_scale 用于整体放大奖励数值。
+def reward_for_position(position, winner, bomb_num, objective, reward_scale=1.0):
     if objective == "adp":
         scale = 2.0 ** bomb_num
     elif objective == "logadp":
         scale = float(bomb_num + 1)
     else:
         scale = 1.0
+    scale *= reward_scale
 
     landlord_reward = scale if winner == "landlord" else -scale
     if position == "landlord":
         return landlord_reward
     return -landlord_reward
+
+
+#note: 返回农民队友位置；地主没有队友。
+def teammate_position(position):
+    if position == "landlord_up":
+        return "landlord_down"
+    if position == "landlord_down":
+        return "landlord_up"
+    return None
+
+
+#note: 判断某个位置最近出牌的人是队友还是敌人，用于中间奖励塑形。
+def relation_to_last_player(position, last_pid):
+    teammate = teammate_position(position)
+    if teammate and last_pid == teammate:
+        return "teammate"
+    if last_pid and last_pid != position:
+        return "enemy"
+    return "self"
+
+
+#note: 用简化手牌坏度估计出牌后结构是否变好，数值越大表示手牌越难打。
+def hand_badness(cards):
+    counts = cards_to_counts(cards)
+    singles = sum(1 for count in counts if count == 1)
+    pairs = sum(1 for count in counts if count == 2)
+    triples = sum(1 for count in counts if count == 3)
+    bombs = sum(1 for count in counts if count == 4)
+    groups = singles + pairs + triples + bombs
+    control_cards = (
+        counts[CARD_TO_INDEX[14]] + counts[CARD_TO_INDEX[17]] +
+        counts[CARD_TO_INDEX[20]] + counts[CARD_TO_INDEX[30]]
+    )
+    return (
+        0.03 * groups +
+        0.02 * singles +
+        0.003 * sum(counts) -
+        0.015 * control_cards -
+        0.02 * bombs
+    )
+
+
+#note: 计算中间奖励，让 Q-learning 不必只依赖终局输赢往前回传信号。
+def shaped_reward_for_action(position, infoset, action, reward_scale=1.0):
+    action = action_key(action)
+    reward = 0.0
+    hand_cards = list(infoset.player_hand_cards or [])
+    hand_count = len(hand_cards)
+    next_hand = hand_cards.copy()
+    for card in action:
+        if card in next_hand:
+            next_hand.remove(card)
+
+    if action:
+        reward += 0.005 * len(action)
+        reward += max(-0.08, min(0.08, hand_badness(hand_cards) - hand_badness(next_hand)))
+
+        next_count = hand_count - len(action)
+        if next_count == 0:
+            reward += 0.20
+        elif next_count <= 2:
+            reward += 0.05
+
+        if action in BOMB_ACTIONS and next_count > 2:
+            reward -= 0.04
+
+    num_left = infoset.num_cards_left_dict or {}
+    last_relation = relation_to_last_player(position, infoset.last_pid)
+    if last_relation == "teammate":
+        teammate = teammate_position(position)
+        teammate_cards = num_left.get(teammate, 17)
+        if teammate_cards <= 2:
+            reward += 0.05 if not action else -0.05
+    elif last_relation == "enemy":
+        enemy_cards = num_left.get(infoset.last_pid, 17)
+        can_follow = any(legal_action for legal_action in infoset.legal_actions)
+        if enemy_cards <= 2:
+            if action:
+                reward += 0.06
+            elif can_follow:
+                reward -= 0.06
+
+    return reward * reward_scale
 
 
 def checkpoint_dir(flags):
@@ -136,6 +228,8 @@ def training_metadata(flags, global_episode, epsilon, load_path, total_steps,
         "alpha": flags.alpha,
         "gamma": flags.gamma,
         "epsilon": epsilon,
+        "reward_scale": flags.reward_scale,
+        "reward_shaping": flags.reward_shaping,
         "state_mode": flags.state_mode,
         "savedir": flags.savedir,
         "resumed_from": load_path,
@@ -274,7 +368,8 @@ class QTable(object):
 
 class SelfPlayQLearningAgent(object):
     def __init__(self, position, qtable, alpha, gamma, epsilon,
-                 state_mode="public", rng=None):
+                 state_mode="public", reward_scale=1.0,
+                 reward_shaping=True, rng=None):
         self.name = "SelfPlayQLearning"
         self.position = position
         self.qtable = qtable
@@ -282,6 +377,8 @@ class SelfPlayQLearningAgent(object):
         self.gamma = gamma
         self.epsilon = epsilon
         self.state_mode = state_mode
+        self.reward_scale = reward_scale
+        self.reward_shaping = reward_shaping
         self.rng = rng or random.Random()
         self.pending = None
         self.num_updates = 0
@@ -292,12 +389,12 @@ class SelfPlayQLearningAgent(object):
     def act(self, infoset):
         state = make_state_key(infoset, self.state_mode)
         if self.pending is not None:
-            prev_state, prev_action = self.pending
+            prev_state, prev_action, prev_reward = self.pending
             self.qtable.update(
                 self.position,
                 prev_state,
                 prev_action,
-                reward=0.0,
+                reward=prev_reward,
                 next_state=state,
                 next_actions=infoset.legal_actions,
                 alpha=self.alpha,
@@ -312,18 +409,23 @@ class SelfPlayQLearningAgent(object):
             epsilon=self.epsilon,
             rng=self.rng,
         )
-        self.pending = (state, action_key(action))
+        shaped_reward = 0.0
+        if self.reward_shaping:
+            shaped_reward = shaped_reward_for_action(
+                self.position, infoset, action, self.reward_scale
+            )
+        self.pending = (state, action_key(action), shaped_reward)
         return action
 
     def finish_episode(self, reward):
         if self.pending is None:
             return
-        state, action = self.pending
+        state, action, shaped_reward = self.pending
         self.qtable.update(
             self.position,
             state,
             action,
-            reward=reward,
+            reward=reward + shaped_reward,
             next_state=None,
             next_actions=None,
             alpha=self.alpha,
@@ -372,6 +474,8 @@ def train(flags):
             gamma=flags.gamma,
             epsilon=flags.epsilon,
             state_mode=flags.state_mode,
+            reward_scale=flags.reward_scale,
+            reward_shaping=flags.reward_shaping,
             rng=random.Random(flags.seed + index + 1),
         )
         for index, position in enumerate(POSITIONS)
@@ -406,7 +510,8 @@ def train(flags):
             bomb_num = env.get_bomb_num()
             for position, agent in agents.items():
                 reward = reward_for_position(
-                    position, winner, bomb_num, flags.objective
+                    position, winner, bomb_num, flags.objective,
+                    flags.reward_scale
                 )
                 agent.finish_episode(reward)
             recent_landlord_wins.append(1 if winner == "landlord" else 0)

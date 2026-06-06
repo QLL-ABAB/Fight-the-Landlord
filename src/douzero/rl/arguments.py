@@ -10,6 +10,12 @@ parser.add_argument("--name", default="default", type=str,
 parser.add_argument("--objective", default="wp", type=str,
                     choices=["wp", "adp", "logadp"],
                     help="Terminal reward objective")
+parser.add_argument("--reward_scale", default=10.0, type=float,
+                    help="Multiply terminal and shaped rewards by this value")
+parser.add_argument("--no_reward_shaping", action="store_false",
+                    dest="reward_shaping",
+                    help="Disable intermediate shaped rewards")
+parser.set_defaults(reward_shaping=True)
 parser.add_argument("--savedir", default="qlearning_checkpoints/qlearning",
                     help="Root directory for Q-learning checkpoints")
 parser.add_argument("--output", default="",
