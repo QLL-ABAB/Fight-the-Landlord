@@ -2,11 +2,15 @@
 set -euo pipefail
 
 #note: Feature-based approximate Q-learning，默认 reward 与原版 DouZero 的 logadp 对齐。
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+#note: 默认配置对齐 DouZero 对照脚本：直接运行会训练 100w 局 history-aware approximate Q-learning。
 GPU_DEVICE="${GPU_DEVICE:-0}"
-TASK_NAME="${TASK_NAME:-approxq_logadp_100k}"
-EPISODES="${EPISODES:-100000}"
+TASK_NAME="${TASK_NAME:-approxq_logadp_cmp_1m_history}"
+EPISODES="${EPISODES:-1000000}"
 SAVEDIR="${SAVEDIR:-approx_qlearning_checkpoints/approx_qlearning}"
-ALPHA="${ALPHA:-0.02}"
+ALPHA="${ALPHA:-0.05}"
 GAMMA="${GAMMA:-0.98}"
 EPSILON="${EPSILON:-0.1}"
 MIN_EPSILON="${MIN_EPSILON:-0.02}"
@@ -18,23 +22,31 @@ FEATURE_MODE="${FEATURE_MODE:-history}"
 MAX_CANDIDATE_ACTIONS="${MAX_CANDIDATE_ACTIONS:-64}"
 L2="${L2:-0.00001}"
 CLIP_TD="${CLIP_TD:-10}"
-DEVICE="${DEVICE:-auto}"
-PROGRESS_INTERVAL="${PROGRESS_INTERVAL:-500}"
-LOG_INTERVAL="${LOG_INTERVAL:-5000}"
+DEVICE="${DEVICE:-cpu}"
+PROGRESS_INTERVAL="${PROGRESS_INTERVAL:-5000}"
+LOG_INTERVAL="${LOG_INTERVAL:-10000}"
 SAVE_INTERVAL="${SAVE_INTERVAL:-50000}"
 
 #note: 可选配置。OUTPUT 指定单个输出文件；RESUME=1 表示从最新 checkpoint 继续。
 OUTPUT="${OUTPUT:-}"
 RESUME="${RESUME:-0}"
-LOG_PATH="${LOG_PATH:-${SAVEDIR}/${TASK_NAME}/train.log}"
+if [[ "${SAVEDIR}" = /* ]]; then
+  CHECKPOINT_ROOT="${SAVEDIR}"
+else
+  CHECKPOINT_ROOT="${REPO_ROOT}/${SAVEDIR}"
+fi
+LOG_PATH="${LOG_PATH:-${CHECKPOINT_ROOT}/${TASK_NAME}/train.log}"
+RUN_LOG_DIR="${RUN_LOG_DIR:-${REPO_ROOT}/run_logs}"
+TIME_LOG="${TIME_LOG:-${RUN_LOG_DIR}/${TASK_NAME}.time.log}"
 
 export CUDA_VISIBLE_DEVICES="${GPU_DEVICE}"
-export PYTHONPATH="${PYTHONPATH:-src}"
+export PYTHONPATH="${PYTHONPATH:-${REPO_ROOT}/src}"
 
-mkdir -p "$(dirname "${LOG_PATH}")"
-exec > >(tee -a "${LOG_PATH}") 2>&1
+mkdir -p "$(dirname "${LOG_PATH}")" "${RUN_LOG_DIR}"
+exec > >(tee -a "${LOG_PATH}" "${TIME_LOG}") 2>&1
 
 echo "Training log: ${LOG_PATH}"
+echo "Time log: ${TIME_LOG}"
 echo "Task=${TASK_NAME} Episodes=${EPISODES} Objective=${OBJECTIVE} RewardScale=${REWARD_SCALE} RewardShaping=${REWARD_SHAPING}"
 echo "Alpha=${ALPHA} Gamma=${GAMMA} Epsilon=${EPSILON} MinEpsilon=${MIN_EPSILON} EpsilonDecay=${EPSILON_DECAY}"
 echo "Device=${DEVICE} FeatureMode=${FEATURE_MODE} MaxCandidateActions=${MAX_CANDIDATE_ACTIONS} ProgressInterval=${PROGRESS_INTERVAL} LogInterval=${LOG_INTERVAL} SaveInterval=${SAVE_INTERVAL}"
@@ -85,4 +97,5 @@ if [[ "${RESUME}" == "1" || "${RESUME}" == "true" || "${RESUME}" == "yes" ]]; th
   ARGS+=(--resume)
 fi
 
-python src/train_approx_qlearning.py "${ARGS[@]}"
+cd "${REPO_ROOT}"
+/usr/bin/time -v python src/train_approx_qlearning.py "${ARGS[@]}"
