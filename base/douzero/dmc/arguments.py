@@ -7,6 +7,8 @@ parser.add_argument('--xpid', default='douzero',
                     help='Experiment id (default: douzero)')
 parser.add_argument('--save_interval', default=30, type=int,
                     help='Time interval (in minutes) at which to save the model')    
+parser.add_argument('--save_interval_frames', default=0, type=int,
+                    help='Frame interval at which to save the model; 0 disables frame-based saving')
 parser.add_argument('--objective', default='adp', type=str, choices=['adp', 'wp', 'logadp'],
                     help='Use ADP or WP as reward (default: ADP)')    
 

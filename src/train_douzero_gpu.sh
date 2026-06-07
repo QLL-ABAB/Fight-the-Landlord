@@ -12,6 +12,8 @@ EPISODES="${EPISODES:-1000000}"
 STEP_MULTIPLIER="${STEP_MULTIPLIER:-60}"
 TOTAL_FRAMES="${TOTAL_FRAMES:-$((EPISODES * STEP_MULTIPLIER))}"
 TASK_NAME="${TASK_NAME:-douzero_logadp_cmp_${TOTAL_FRAMES}}"
+SAVE_INTERVAL="${SAVE_INTERVAL:-50000}"
+SAVE_INTERVAL_FRAMES="${SAVE_INTERVAL_FRAMES:-$((STEP_MULTIPLIER * SAVE_INTERVAL))}"
 
 #note: reward 默认使用 logadp，方便和 approx_qlearning 的 OBJECTIVE=logadp 对照。
 OBJECTIVE="${OBJECTIVE:-logadp}"
@@ -19,7 +21,7 @@ SAVEDIR="${SAVEDIR:-${BASE_DIR}/douzero_checkpoints}"
 RUN_LOG_DIR="${RUN_LOG_DIR:-${REPO_ROOT}/run_logs}"
 TIME_LOG="${TIME_LOG:-${RUN_LOG_DIR}/${TASK_NAME}.time.log}"
 
-#note: 原版 DouZero 的 checkpoint interval 单位是分钟，不是 episode/frame；默认设大，避免频繁保存影响速度对照。
+#note: 原版 DouZero 保留按分钟保存；本脚本额外传入按 frame 保存，默认每 60 * 50000 frames 保存一次。
 SAVE_INTERVAL_MINUTES="${SAVE_INTERVAL_MINUTES:-999999}"
 
 #note: 原版 DouZero 的采样和学习并行参数，可按机器 CPU/GPU 资源调整。
@@ -50,6 +52,7 @@ ARGS=(
   --num_threads "${NUM_THREADS}"
   --total_frames "${TOTAL_FRAMES}"
   --save_interval "${SAVE_INTERVAL_MINUTES}"
+  --save_interval_frames "${SAVE_INTERVAL_FRAMES}"
   --savedir "${SAVEDIR}"
   --batch_size "${BATCH_SIZE}"
   --unroll_length "${UNROLL_LENGTH}"
@@ -73,8 +76,9 @@ fi
   echo "DouZero training log: ${TIME_LOG}"
   echo "Task=${TASK_NAME} Objective=${OBJECTIVE} EpisodesRef=${EPISODES} StepMultiplier=${STEP_MULTIPLIER} TotalFrames=${TOTAL_FRAMES}"
   echo "GPUDevices=${GPU_DEVICES} TrainingDevice=${TRAINING_DEVICE} NumActorDevices=${NUM_ACTOR_DEVICES} NumActors=${NUM_ACTORS} NumThreads=${NUM_THREADS}"
-  echo "BatchSize=${BATCH_SIZE} UnrollLength=${UNROLL_LENGTH} ExpEpsilon=${EXP_EPSILON} LearningRate=${LEARNING_RATE} SaveIntervalMinutes=${SAVE_INTERVAL_MINUTES}"
-  echo "Note: original DouZero logs about every 5 seconds; save_interval is measured in minutes, not frames."
+  echo "BatchSize=${BATCH_SIZE} UnrollLength=${UNROLL_LENGTH} ExpEpsilon=${EXP_EPSILON} LearningRate=${LEARNING_RATE}"
+  echo "SaveInterval=${SAVE_INTERVAL} SaveIntervalFrames=${SAVE_INTERVAL_FRAMES} SaveIntervalMinutes=${SAVE_INTERVAL_MINUTES}"
+  echo "Note: original DouZero logs about every 5 seconds, so frame-based checkpoints save when frames reach or pass the interval."
   cd "${BASE_DIR}"
   /usr/bin/time -v python train.py "${ARGS[@]}"
 } 2>&1 | tee "${TIME_LOG}"

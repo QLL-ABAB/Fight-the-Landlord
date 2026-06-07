@@ -212,13 +212,22 @@ def train(flags):
     timer = timeit.default_timer
     try:
         last_checkpoint_time = timer() - flags.save_interval * 60
+        save_interval_frames = int(getattr(flags, 'save_interval_frames', 0) or 0)
+        next_checkpoint_frames = (
+            ((frames // save_interval_frames) + 1) * save_interval_frames
+            if save_interval_frames > 0 else None
+        )
         while frames < flags.total_frames:
             start_frames = frames
             position_start_frames = {k: position_frames[k] for k in position_frames}
             start_time = timer()
             time.sleep(5)
 
-            if timer() - last_checkpoint_time > flags.save_interval * 60:  
+            if save_interval_frames > 0 and frames >= next_checkpoint_frames:
+                checkpoint(frames)
+                while next_checkpoint_frames <= frames:
+                    next_checkpoint_frames += save_interval_frames
+            elif save_interval_frames <= 0 and timer() - last_checkpoint_time > flags.save_interval * 60:  
                 checkpoint(frames)
                 last_checkpoint_time = timer()
             end_time = timer()
