@@ -19,6 +19,7 @@ env/
 
 # Training checkpoints and generated models
 qlearning_checkpoints/
+approx_qlearning_checkpoints/
 douzero_checkpoints/
 most_recent_model/
 *.ckpt
@@ -33,4 +34,3 @@ eval_data.pkl
 # Logs
 *.log
 logs/
-

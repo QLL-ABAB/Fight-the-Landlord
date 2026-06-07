@@ -2,6 +2,7 @@ import multiprocessing as mp
 import json
 import os
 import pickle
+import traceback
 
 from douzero.env.game import GameEnv
 
@@ -47,6 +48,16 @@ def load_card_play_models(card_play_model_path_dict):
 
             model_path = card_play_model_path_dict[position].split(":", 1)[1]
             players[position] = QLearningAgent(position, model_path)
+        elif card_play_model_path_dict[position] in ["approxq", "approx_qlearning"]:
+            from .approx_qlearning_agent import ApproxQLearningAgent
+
+            players[position] = ApproxQLearningAgent(position)
+        elif card_play_model_path_dict[position].startswith("approxq:") or \
+                card_play_model_path_dict[position].startswith("approx_qlearning:"):
+            from .approx_qlearning_agent import ApproxQLearningAgent
+
+            model_path = card_play_model_path_dict[position].split(":", 1)[1]
+            players[position] = ApproxQLearningAgent(position, model_path)
         elif isinstance(card_play_model_path_dict[position], str) and card_play_model_path_dict[position].startswith('search'):
             from .search_agent import SearchAgent
             
@@ -139,28 +150,31 @@ def add_win_rates(stats):
 
 
 def mp_simulate(card_play_data_list, card_play_model_path_dict, role_to_method, q):
+    try:
+        players = load_card_play_models(card_play_model_path_dict)
+        methods = list(dict.fromkeys(role_to_method.values()))
+        player_stats = empty_player_stats(methods)
 
-    players = load_card_play_models(card_play_model_path_dict)
-    methods = list(dict.fromkeys(role_to_method.values()))
-    player_stats = empty_player_stats(methods)
+        env = GameEnv(players)
+        for idx, card_play_data in enumerate(card_play_data_list):
+            env.card_play_init(card_play_data)
+            while not env.game_over:
+                env.step()
+            update_player_stats(player_stats, role_to_method, env.get_winner())
+            env.reset()
 
-    env = GameEnv(players)
-    for idx, card_play_data in enumerate(card_play_data_list):
-        env.card_play_init(card_play_data)
-        while not env.game_over:
-            env.step()
-        update_player_stats(player_stats, role_to_method, env.get_winner())
-        env.reset()
-
-    q.put(
-        (
-            env.num_wins["landlord"],
-            env.num_wins["farmer"],
-            env.num_scores["landlord"],
-            env.num_scores["farmer"],
-            player_stats,
+        q.put(
+            (
+                "ok",
+                env.num_wins["landlord"],
+                env.num_wins["farmer"],
+                env.num_scores["landlord"],
+                env.num_scores["farmer"],
+                player_stats,
+            )
         )
-    )
+    except Exception:
+        q.put(("error", traceback.format_exc()))
 
 
 def data_allocation_per_worker(card_play_data_list, num_workers):
@@ -195,14 +209,22 @@ def simulate_one_assignment(card_play_data_list, role_to_method, num_workers):
 
     for p in processes:
         p.join()
+        if p.exitcode != 0:
+            raise RuntimeError(
+                "Evaluation worker exited with code {}".format(p.exitcode)
+            )
 
     for i in range(num_workers):
         result = q.get()
-        num_landlord_wins += result[0]
-        num_farmer_wins += result[1]
-        num_landlord_scores += result[2]
-        num_farmer_scores += result[3]
-        merge_player_stats(player_stats, result[4])
+        if result[0] == "error":
+            raise RuntimeError(
+                "Evaluation worker failed:\n{}".format(result[1])
+            )
+        num_landlord_wins += result[1]
+        num_farmer_wins += result[2]
+        num_landlord_scores += result[3]
+        num_farmer_scores += result[4]
+        merge_player_stats(player_stats, result[5])
 
     total_games = num_landlord_wins + num_farmer_wins
     return {

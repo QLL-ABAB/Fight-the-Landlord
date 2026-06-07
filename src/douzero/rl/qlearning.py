@@ -354,8 +354,10 @@ class QTable(object):
             "values": self.values,
             "metadata": self.metadata,
         }
-        with open(path, "wb") as f:
+        tmp_path = "{}.tmp".format(path)
+        with open(tmp_path, "wb") as f:
             pickle.dump(payload, f, pickle.HIGHEST_PROTOCOL)
+        os.replace(tmp_path, path)
 
     @classmethod
     def load(cls, path):
