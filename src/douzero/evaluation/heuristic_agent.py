@@ -65,15 +65,14 @@ NORMAL_CHAIN_ORDER = ["3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"
 ALL_POSITIONS = ["landlord", "landlord_down", "landlord_up"]
 
 
-class BayesianMDPAgent(object):
+class HeuristicAgent(object):
     """
-    Bayesian + MDP style Dou Dizhu Agent.
+    heuristic
 
-    这个版本不改变原始策略逻辑，只把可调数字参数集中到 self.cfg。
     """
 
     def __init__(self, position, debug=False):
-        self.name = "BayesianMDP_v2_cfg"
+        self.name = "Heuristic_v2_cfg"
         self.position = position
         self.debug = debug
         self.fallback_count = 0

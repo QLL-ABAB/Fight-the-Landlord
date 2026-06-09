@@ -3,7 +3,7 @@ import argparse
 
 from douzero.evaluation.simulation import evaluate
 
-# rlcard vs mdp vs random vs baselines/sl/landlord_down.ckpt
+# rlcard vs mdp vs heuristic vs random vs baselines/sl/landlord_down.ckpt vs probability vs adv
 # 使用训练好的模型（将路径替换为实际的 .ckpt 文件路径）
 # method = [
 #     "douzero_checkpoints/douzero/landlord_weights_1036800.ckpt",
@@ -11,7 +11,7 @@ from douzero.evaluation.simulation import evaluate
 #     "douzero_checkpoints/douzero/landlord_down_weights_1036800.ckpt",
 # ]
 
-method = ["adv", "random", "random"]
+method = ["value", "rlcard", "rlcard"] 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("Dou Dizhu Evaluation")
@@ -27,7 +27,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--eval_mode",
         choices=["fixed", "rotate"],
-        default="fixed",
+        default="rotate",
         help="fixed keeps the first method as landlord; rotate lets each method be landlord once",
     )
     parser.add_argument(

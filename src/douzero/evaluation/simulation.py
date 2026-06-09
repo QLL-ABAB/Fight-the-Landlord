@@ -4,6 +4,8 @@ import os
 import pickle
 import traceback
 
+from tqdm import tqdm
+
 from douzero.env.game import GameEnv
 
 
@@ -31,11 +33,19 @@ def load_card_play_models(card_play_model_path_dict):
             from .random_agent import RandomAgent
 
             players[position] = RandomAgent()
-        elif card_play_model_path_dict[position] == "mdp":
-            from .mdp_agent import BayesianMDPAgent
+        elif card_play_model_path_dict[position] == "heuristic":
+            from .heuristic_agent import HeuristicAgent
 
-            players[position] = BayesianMDPAgent(position)
-        elif card_play_model_path_dict[position] == "adv":
+            players[position] = HeuristicAgent(position)
+        elif card_play_model_path_dict[position] == "value":
+            from .valueiteration_agent import ValueDPAgent
+
+            players[position] = ValueDPAgent(position)
+        elif card_play_model_path_dict[position] == "probability":
+            from .probabilistic_response_agent import ProbabilisticResponseAgent
+
+            players[position] = ProbabilisticResponseAgent(position)
+        elif card_play_model_path_dict[position] == "adversarial":
             from .adversarial_agent import AdversarialSearchAgent
 
             players[position] = AdversarialSearchAgent(position)
@@ -149,14 +159,22 @@ def add_win_rates(stats):
     return result
 
 
-def mp_simulate(card_play_data_list, card_play_model_path_dict, role_to_method, q):
+def mp_simulate(card_play_data_list, card_play_model_path_dict, role_to_method, q, show_progress=True):
     try:
         players = load_card_play_models(card_play_model_path_dict)
         methods = list(dict.fromkeys(role_to_method.values()))
         player_stats = empty_player_stats(methods)
 
         env = GameEnv(players)
-        for idx, card_play_data in enumerate(card_play_data_list):
+        total_games = len(card_play_data_list)
+        
+        if show_progress:
+            iterator = tqdm(card_play_data_list, desc=f"Simulating games", 
+                            total=total_games, leave=True, ncols=80)
+        else:
+            iterator = card_play_data_list
+        
+        for idx, card_play_data in enumerate(iterator):
             env.card_play_init(card_play_data)
             while not env.game_over:
                 env.step()
