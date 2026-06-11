@@ -45,6 +45,12 @@ if __name__ == "__main__":
 
     parser.add_argument("--eval_data", type=str, default="eval_data.pkl")
     parser.add_argument("--num_workers", type=int, default=5)
+    parser.add_argument(
+        "--assignment_workers",
+        type=int,
+        default=1,
+        help="How many fixed/rotate role assignments to evaluate in parallel",
+    )
     parser.add_argument("--gpu_device", type=str, default="")
     args = parser.parse_args()
 
@@ -61,4 +67,5 @@ if __name__ == "__main__":
         methods=args.methods,
         evaluate_name=args.evaluate_name,
         result_dir=args.result_dir,
+        assignment_workers=args.assignment_workers,
     )

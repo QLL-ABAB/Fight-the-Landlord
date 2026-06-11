@@ -1,11 +1,39 @@
 import torch
 import numpy as np
+import importlib.util
+from pathlib import Path
 
 from douzero.env.env import get_obs
 
+
+def _load_base_model_dict():
+    root = Path(__file__).resolve().parents[3]
+    models_path = root / "base" / "douzero" / "dmc" / "models.py"
+    if not models_path.exists():
+        raise ModuleNotFoundError(
+            "No module named 'douzero.dmc' and fallback model file was not found: "
+            "{}".format(models_path)
+        )
+
+    spec = importlib.util.spec_from_file_location(
+        "cadam_douzero_base_dmc_models", str(models_path)
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.model_dict
+
+
+def _model_dict():
+    try:
+        from douzero.dmc.models import model_dict
+
+        return model_dict
+    except ModuleNotFoundError:
+        return _load_base_model_dict()
+
+
 def _load_model(position, model_path):
-    from douzero.dmc.models import model_dict
-    model = model_dict[position]()
+    model = _model_dict()[position]()
     model_state_dict = model.state_dict()
     if torch.cuda.is_available():
         pretrained = torch.load(model_path, map_location='cuda:0')

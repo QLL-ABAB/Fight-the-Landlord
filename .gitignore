@@ -27,7 +27,9 @@ most_recent_model/
 *.pth
 
 # Generated data/results
-evaluate_results/
+# Keep evaluation JSONs trackable for experiment comparison.
+!evaluate_results/
+!evaluate_results/*.json
 eval_data.pkl
 *.pkl
 
