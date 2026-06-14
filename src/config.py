@@ -120,10 +120,13 @@ def _probability(position: str, _: str | None):
     return ProbabilisticResponseAgent(position)
 
 
-def _adversarial(position: str, _: str | None):
+def _adversarial(position: str, arg: str | None):
     from douzero.evaluation.adversarial_agent import AdversarialSearchAgent
 
-    return AdversarialSearchAgent(position)
+    num_samples = int(arg) if arg and arg.isdigit() else 800  # 默认50
+    agent = AdversarialSearchAgent(position)
+    agent.cfg["num_samples"] = num_samples  # 设置采样数
+    return agent
 
 
 def _qlearning(position: str, model_path: str | None):
