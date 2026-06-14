@@ -130,13 +130,18 @@ def load_card_play_models(card_play_model_path_dict):
             from .random_agent import RandomAgent
 
             players[position] = RandomAgent()
-        elif method == "mdp":
-            from .mdp_agent import BayesianMDPAgent
+        elif method == "heuristic":
 
-            players[position] = BayesianMDPAgent(position)
-        elif method == "adv":
+            from .heuristic_agent import HeuristicAgent
+            players[position] = HeuristicAgent(position)
+        elif method == "value":
+            from .valueiteration_agent import ValueDPAgent
+            players[position] = ValueDPAgent(position)
+        elif method == "probability":
+            from .probabilistic_response_agent import ProbabilisticResponseAgent
+            players[position] = ProbabilisticResponseAgent(position)
+        elif method == "adversarial":
             from .adversarial_agent import AdversarialSearchAgent
-
             players[position] = AdversarialSearchAgent(position)
         elif method == "qlearning":
             from .qlearning_agent import QLearningAgent
