@@ -7,6 +7,7 @@ from pathlib import Path
 
 from tqdm import tqdm
 
+from config import make_agent, normalized_method
 from douzero.env.game import GameEnv
 
 
@@ -87,13 +88,7 @@ def resolve_douzero_model_path(position, model_path):
 
 
 def model_label(method):
-    if not isinstance(method, str):
-        return method
-    if method.startswith("douzero:"):
-        return method
-    if method.endswith(".ckpt"):
-        return "douzero:{}".format(method)
-    return method
+    return normalized_method(method) if isinstance(method, str) else method
 
 
 def resolve_model_for_position(position, method):
@@ -118,89 +113,10 @@ def startswith_method(method, prefix):
 
 
 def load_card_play_models(card_play_model_path_dict):
-    players = {}
-
-    for position in POSITIONS:
-        method = card_play_model_path_dict[position]
-        if method == "rlcard":
-            from .rlcard_agent import RLCardAgent
-
-            players[position] = RLCardAgent(position)
-        elif method == "random":
-            from .random_agent import RandomAgent
-
-            players[position] = RandomAgent()
-        elif method == "heuristic":
-
-            from .heuristic_agent import HeuristicAgent
-            players[position] = HeuristicAgent(position)
-        elif method == "value":
-            from .valueiteration_agent import ValueDPAgent
-            players[position] = ValueDPAgent(position)
-        elif method == "probability":
-            from .probabilistic_response_agent import ProbabilisticResponseAgent
-            players[position] = ProbabilisticResponseAgent(position)
-        elif method == "adversarial":
-            from .adversarial_agent import AdversarialSearchAgent
-            players[position] = AdversarialSearchAgent(position)
-        elif method == "qlearning":
-            from .qlearning_agent import QLearningAgent
-
-            players[position] = QLearningAgent(position)
-        elif startswith_method(method, "qlearning:"):
-            from .qlearning_agent import QLearningAgent
-
-            model_path = method.split(":", 1)[1]
-            players[position] = QLearningAgent(position, model_path)
-        elif method in ["approxq", "approx_qlearning"]:
-            from .approx_qlearning_agent import ApproxQLearningAgent
-
-            players[position] = ApproxQLearningAgent(position)
-        elif startswith_method(method, "approxq:") or \
-                startswith_method(method, "approx_qlearning:"):
-            from .approx_qlearning_agent import ApproxQLearningAgent
-
-            model_path = method.split(":", 1)[1]
-            players[position] = ApproxQLearningAgent(position, model_path)
-        elif startswith_method(method, "douzero:"):
-            from .deep_agent import DeepAgent
-
-            players[position] = DeepAgent(
-                position, resolve_douzero_model_path(position, method)
-            )
-        elif isinstance(method, str) and method.endswith(".ckpt"):
-            from .deep_agent import DeepAgent
-
-            players[position] = DeepAgent(
-                position, resolve_douzero_model_path(
-                    position, "douzero:{}".format(method)
-                )
-            )
-        elif isinstance(method, str) and method.startswith('search'):
-            from .search_agent import SearchAgent
-            
-            s = method
-            parts = s.split(':')
-            if len(parts) == 2 and parts[1].isdigit():
-                players[position] = SearchAgent(int(parts[1]))
-            else:
-                players[position] = SearchAgent()
-        elif isinstance(method, str) and method.startswith('expectimax'):
-            from .expectimax_agent import ExpectimaxAgent
-
-            s = method
-            parts = s.split(':')
-            if len(parts) == 3 and parts[1].isdigit() and parts[2].isdigit():
-                players[position] = ExpectimaxAgent(int(parts[1]), int(parts[2]))
-            elif len(parts) == 2 and parts[1].isdigit():
-                players[position] = ExpectimaxAgent(int(parts[1]))
-            else:
-                players[position] = ExpectimaxAgent()
-        else:
-            from .deep_agent import DeepAgent
-
-            players[position] = DeepAgent(position, method)
-    return players
+    return {
+        position: make_agent(card_play_model_path_dict[position], position)
+        for position in POSITIONS
+    }
 
 
 def empty_player_stats(methods):
@@ -314,7 +230,9 @@ def data_allocation_per_worker(card_play_data_list, num_workers):
     return card_play_data_list_each_worker
 
 
-def simulate_one_assignment(card_play_data_list, role_to_method, num_workers):
+def simulate_one_assignment(
+    card_play_data_list, role_to_method, num_workers, show_progress=True
+):
     card_play_data_list_each_worker = data_allocation_per_worker(
         card_play_data_list, num_workers
     )
@@ -332,7 +250,7 @@ def simulate_one_assignment(card_play_data_list, role_to_method, num_workers):
     for card_play_data in card_play_data_list_each_worker:
         p = ctx.Process(
             target=mp_simulate,
-            args=(card_play_data, role_to_method, role_to_method, q),
+            args=(card_play_data, role_to_method, role_to_method, q, show_progress),
         )
         p.start()
         processes.append(p)

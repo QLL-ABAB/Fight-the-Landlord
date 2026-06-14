@@ -68,15 +68,32 @@ PYTHONPATH=src python src/train_approx_qlearning.py \
 
 ## 评测方法写法
 
-`src/evaluate.py --methods A B C` 需要传 3 个方法。`fixed` 模式中 `A` 固定做地主，`B/C` 做农民；`rotate` 模式中三者轮流做地主。
+推荐优先使用 `src/config.py` 里的命名配置：
+
+```bash
+python3 src/evaluate.py --list_configs
+python3 src/evaluate.py --config approxq_1m_vs_rlcard_rotate
+python3 src/evaluate.py --config douzero_60m_vs_rlcard_rotate
+```
+
+临时测一个方法和两个 `rlcard` 对打，可以用短写：
+
+```bash
+python3 src/evaluate.py --method probability
+python3 src/evaluate.py --method value --eval_mode fixed
+python3 src/evaluate.py --method approxq:/path/to/model.pkl --eval_mode fixed
+```
+
+需要完全自定义时，再用 `--methods A B C`。`fixed` 模式中 `A` 固定做地主，`B/C` 做农民；`rotate` 模式中三者轮流做地主。
 
 常用方法名：
 
 ```text
 rlcard                         RLCard 规则 agent
 random                         随机 agent
-mdp                            Bayesian MDP agent
-adv                            adversarial search agent
+value 或 mdp                    value-DP / MDP-style agent
+probability 或 prob             probabilistic response agent
+adversarial 或 adv              adversarial search agent
 qlearning                      默认或最新 tabular Q-learning checkpoint
 qlearning:任务名               任务目录下最新 tabular checkpoint
 qlearning:/path/model.pkl      明确 tabular checkpoint
@@ -97,17 +114,8 @@ ApproxQ vs rlcard，三组座位轮换：
 mkdir -p run_logs evaluate_results
 
 /bin/time -v python3 src/evaluate.py \
-  --eval_mode rotate \
-  --methods \
-    approxq:/data/sea_disk0/qianlei/Codes/Fight-the-Landlord/approx_qlearning_checkpoints/approx_qlearning/approxq_logadp_cmp_1m_history/1000000.pkl \
-    rlcard \
-    rlcard \
-  --eval_data /data/sea_disk0/qianlei/Codes/Fight-the-Landlord/eval_data.pkl \
-  --num_workers 5 \
-  --assignment_workers 3 \
-  --evaluate_name approxq_logadp_cmp_1m_history_vs_rlcard_rotate \
-  --result_dir evaluate_results \
-  2>&1 | tee run_logs/approxq_logadp_cmp_1m_history_vs_rlcard_rotate.log
+  --config approxq_1m_vs_rlcard_rotate \
+  2>&1 | tee run_logs/approxq_1m_vs_rlcard_rotate.log
 ```
 
 DouZero vs rlcard，三组座位轮换：
@@ -116,36 +124,48 @@ DouZero vs rlcard，三组座位轮换：
 mkdir -p run_logs evaluate_results
 
 /bin/time -v python3 src/evaluate.py \
-  --eval_mode rotate \
-  --methods \
-    douzero:/data/sea_disk0/qianlei/Codes/Fight-the-Landlord/base/douzero_checkpoints/douzero_logadp_cmp_60000000/landlord_weights_60000000.ckpt \
-    rlcard \
-    rlcard \
-  --eval_data /data/sea_disk0/qianlei/Codes/Fight-the-Landlord/eval_data.pkl \
-  --num_workers 5 \
-  --assignment_workers 3 \
-  --evaluate_name douzero_logadp_cmp_60m_vs_rlcard_rotate \
-  --result_dir evaluate_results \
-  2>&1 | tee run_logs/douzero_logadp_cmp_60m_vs_rlcard_rotate.log
+  --config douzero_60m_vs_rlcard_rotate \
+  2>&1 | tee run_logs/douzero_60m_vs_rlcard_rotate.log
 ```
 
 固定座位评测：
 
 ```bash
 python3 src/evaluate.py \
+  --method qlearning:qlearning_logadp_100k \
   --eval_mode fixed \
-  --methods mdp qlearning:qlearning_logadp_100k rlcard \
-  --eval_data eval_data.pkl \
-  --num_workers 5 \
-  --evaluate_name fixed_mdp_qlearning_rlcard \
-  --result_dir evaluate_results
+  --evaluate_name fixed_qlearning_rlcard
 ```
 
 ## Evaluate 每个选项怎么填
 
+`--config NAME`
+
+使用 `src/config.py` 里的命名配置。例子：
+
+```bash
+--config approxq_1m_vs_rlcard_rotate
+```
+
+`--list_configs`
+
+列出所有可用配置，不执行评测。例子：
+
+```bash
+--list_configs
+```
+
+`--method METHOD`
+
+短写，等价于 `--methods METHOD rlcard rlcard`。例子：
+
+```bash
+--method probability
+```
+
 `--methods A B C`
 
-必须传 3 个方法，是最推荐的写法。例子：
+传 3 个方法，完全自定义三家。例子：
 
 ```bash
 --methods approxq:approxq_logadp_cmp_1m_history rlcard rlcard

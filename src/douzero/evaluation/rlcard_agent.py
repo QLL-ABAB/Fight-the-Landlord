@@ -1,5 +1,9 @@
 import random
 
+from douzero.evaluation.rlcard_data import ensure_rlcard_doudizhu_jsondata
+
+ensure_rlcard_doudizhu_jsondata()
+
 from rlcard.games.doudizhu.utils import CARD_TYPE
 
 EnvCard2RealCard = {

@@ -1,23 +1,26 @@
 import os
 import argparse
 
-from douzero.evaluation.simulation import evaluate
+from config import EVAL_CONFIGS, get_eval_config, override_eval_config, run_eval_config
 
-# rlcard vs mdp vs heuristic vs random vs baselines/sl/landlord_down.ckpt vs probability vs adversarial
-# 使用训练好的模型（将路径替换为实际的 .ckpt 文件路径）
-# method = [
-#     "douzero_checkpoints/douzero/landlord_weights_1036800.ckpt",
-#     "douzero_checkpoints/douzero/landlord_up_weights_1036800.ckpt",
-#     "douzero_checkpoints/douzero/landlord_down_weights_1036800.ckpt",
-# ]
-
-method = ["probability", "rlcard", "rlcard"] 
+DEFAULT_CONFIG = "probability_vs_rlcard_rotate"
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("Dou Dizhu Evaluation")
-    parser.add_argument("--landlord", type=str, default=method[0])
-    parser.add_argument("--landlord_up", type=str, default=method[1])
-    parser.add_argument("--landlord_down", type=str, default=method[2])
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="",
+        help="Use a named evaluation preset from src/config.py",
+    )
+    parser.add_argument(
+        "--list_configs",
+        action="store_true",
+        help="List named evaluation presets and exit",
+    )
+    parser.add_argument("--landlord", type=str, default=None)
+    parser.add_argument("--landlord_up", type=str, default=None)
+    parser.add_argument("--landlord_down", type=str, default=None)
     parser.add_argument(
         "--methods",
         nargs=3,
@@ -25,9 +28,15 @@ if __name__ == "__main__":
         help="Three agents for fixed/rotate evaluation",
     )
     parser.add_argument(
+        "--method",
+        type=str,
+        default=None,
+        help="Shortcut for '--methods METHOD rlcard rlcard'",
+    )
+    parser.add_argument(
         "--eval_mode",
         choices=["fixed", "rotate"],
-        default="rotate",
+        default=None,
         help="fixed keeps the first method as landlord; rotate lets each method be landlord once",
     )
     parser.add_argument(
@@ -43,29 +52,65 @@ if __name__ == "__main__":
         help="Directory where evaluation JSON files are saved",
     )
 
-    parser.add_argument("--eval_data", type=str, default="eval_data.pkl")
-    parser.add_argument("--num_workers", type=int, default=5)
+    parser.add_argument("--eval_data", type=str, default=None)
+    parser.add_argument("--num_workers", type=int, default=None)
     parser.add_argument(
         "--assignment_workers",
         type=int,
-        default=1,
+        default=None,
         help="How many fixed/rotate role assignments to evaluate in parallel",
     )
-    parser.add_argument("--gpu_device", type=str, default="")
+    parser.add_argument("--gpu_device", type=str, default=None)
     args = parser.parse_args()
 
-    os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
-    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_device
+    if args.list_configs:
+        for name in sorted(EVAL_CONFIGS):
+            cfg = EVAL_CONFIGS[name]
+            print(
+                "{} -> mode={}, methods={}, workers={}, assignment_workers={}".format(
+                    name,
+                    cfg.eval_mode,
+                    cfg.methods,
+                    cfg.num_workers,
+                    cfg.assignment_workers,
+                )
+            )
+        raise SystemExit(0)
 
-    evaluate(
-        args.landlord,
-        args.landlord_up,
-        args.landlord_down,
-        args.eval_data,
-        args.num_workers,
+    config = None
+    if args.config:
+        config = get_eval_config(args.config)
+
+    if args.method:
+        methods = (args.method, "rlcard", "rlcard")
+    elif args.methods:
+        methods = tuple(args.methods)
+    elif args.landlord or args.landlord_up or args.landlord_down:
+        base = get_eval_config(DEFAULT_CONFIG).methods
+        methods = (
+            args.landlord or base[0],
+            args.landlord_up or base[1],
+            args.landlord_down or base[2],
+        )
+    else:
+        methods = None
+
+    if config is None:
+        config = get_eval_config(DEFAULT_CONFIG)
+
+    config = override_eval_config(
+        config,
+        methods=methods,
         eval_mode=args.eval_mode,
-        methods=args.methods,
-        evaluate_name=args.evaluate_name,
-        result_dir=args.result_dir,
+        evaluate_name=args.evaluate_name if args.evaluate_name != "evaluate" else None,
+        result_dir=args.result_dir if args.result_dir != "evaluate_results" else None,
+        eval_data=args.eval_data,
+        num_workers=args.num_workers,
         assignment_workers=args.assignment_workers,
+        gpu_device=args.gpu_device,
     )
+
+    os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
+    os.environ["CUDA_VISIBLE_DEVICES"] = config.gpu_device
+
+    run_eval_config(config)
