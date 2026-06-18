@@ -147,6 +147,13 @@ def _policy_gradient(position: str, model_path: str | None):
     return PolicyGradientAgent(position, model_path)
 
 
+#TODO: 注册 DouZero 原始特征版线性 ApproxQ，支持 TD/MC 训练产物评测。
+def _approx_doufeature(position: str, model_path: str | None):
+    from douzero.evaluation.approx_doufeature_agent import ApproxDouFeatureAgent
+
+    return ApproxDouFeatureAgent(position, model_path)
+
+
 def _search(_: str, arg: str | None):
     from douzero.evaluation.search_agent import SearchAgent
 
@@ -198,6 +205,12 @@ AGENT_SPECS = (
         ("approx_qlearning",),
         _approxq,
         description="Feature-based approximate Q-learning agent",
+    ),
+    AgentSpec(
+        "approx_doufeature",
+        ("approxdou", "approxdf"),
+        _approx_doufeature,
+        description="Linear ApproxQ with original DouZero x/z features",
     ),
     AgentSpec(
         "policy_gradient",

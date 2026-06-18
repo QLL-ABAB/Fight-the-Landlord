@@ -1,10 +1,4 @@
-from douzero.rl.approx_arguments import parser
-try:
-    from douzero.rl.approx_qlearning import train
-except ModuleNotFoundError as exc:
-    if exc.name != "douzero.rl.approx_qlearning":
-        raise
-    from douzero.rl.approx_qlearning_fasle import train
+from douzero.rl.approx_doufeature import build_parser, train
 from train_config import (
     apply_train_config_to_args,
     config_summary,
@@ -39,24 +33,31 @@ CONFIG_OVERRIDE_FIELDS = (
     "log_interval",
     "progress_interval",
     "save_interval",
+    "update_mode",
+    "num_workers",
+    "worker_episodes",
+    "cpu_threads",
+    "diag_topk",
 )
 
 
-def add_config_args():
+#TODO: 给 approx_doufeature 加上和旧 ApproxQ 一致的命名配置入口。
+def add_config_args(parser):
     parser.add_argument(
         "--config",
         type=str,
         default="",
-        help="Use a named training config from src/train_config.py",
+        help="Use a named approx_doufeature training config from src/train_config.py",
     )
     parser.add_argument(
         "--list_configs",
         action="store_true",
-        help="List named training configs and exit",
+        help="List named approx_doufeature training configs and exit",
     )
 
 
-def cli_overrides(args):
+#TODO: 只让用户显式写在命令行里的参数覆盖 config.py 中的值。
+def cli_overrides(parser, args):
     provided = {
         action.dest
         for action in parser._actions
@@ -76,8 +77,10 @@ def cli_overrides(args):
     return overrides
 
 
-if __name__ == "__main__":
-    add_config_args()
+#TODO: 复用 approx_doufeature 内部 parser，保持和旧训练脚本相近的命令行接口。
+def main():
+    parser = build_parser()
+    add_config_args(parser)
     flags = parser.parse_args()
     flags._provided_options = {
         token.split("=", 1)[0]
@@ -86,13 +89,17 @@ if __name__ == "__main__":
     }
 
     if flags.list_configs:
-        for name, config in sorted(train_configs_for_algorithm("approxq").items()):
+        for name, config in sorted(train_configs_for_algorithm("approx_doufeature").items()):
             print(config_summary(config))
         raise SystemExit(0)
 
     if flags.config:
-        config = get_train_config(flags.config, algorithm="approxq")
-        config = override_train_config(config, **cli_overrides(flags))
+        config = get_train_config(flags.config, algorithm="approx_doufeature")
+        config = override_train_config(config, **cli_overrides(parser, flags))
         flags = apply_train_config_to_args(flags, config)
 
     train(flags)
+
+
+if __name__ == "__main__":
+    main()

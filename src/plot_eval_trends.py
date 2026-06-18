@@ -31,6 +31,7 @@ DEFAULT_EVAL_DATA = REPO_ROOT / "eval_data.pkl"
 DEFAULT_OUTPUT_PREFIX = "approxq_douzero_vs_rlcard_fixed_trend"
 DOUZERO_CHECKPOINT_RE = re.compile(r"landlord_weights_(\d+)\.ckpt$")
 SERIES_ARG_RE = re.compile(r"^(?P<label>[^=]+)=(?P<path>.+)$")
+SERIES_PREFIXES = {"approxq", "approx_doufeature", "approxdou", "approxdf"}
 
 
 def numeric_approxq_checkpoints(directory: Path):
@@ -63,17 +64,24 @@ def limited_points(points, max_points: int):
 
 def parse_series_args(series_args, default_label, default_path):
     if not series_args:
-        return [(default_label, Path(default_path))]
+        return [(default_label, "approxq", Path(default_path))]
     parsed = []
     for item in series_args:
         match = SERIES_ARG_RE.match(item)
         if not match:
             raise ValueError(
-                "Invalid series spec '{}'. Use label=/path/to/checkpoints".format(
-                    item
-                )
+                "Invalid series spec '{}'. Use label=/path or "
+                "label=agent_prefix:/path".format(item)
             )
-        parsed.append((match.group("label"), Path(match.group("path"))))
+        value = match.group("path")
+        method_prefix = "approxq"
+        for prefix in SERIES_PREFIXES:
+            marker = "{}:".format(prefix)
+            if value.startswith(marker):
+                method_prefix = prefix
+                value = value[len(marker):]
+                break
+        parsed.append((match.group("label"), method_prefix, Path(value)))
     return parsed
 
 
@@ -151,6 +159,21 @@ def write_plot_data(path: Path, rows):
         )
         writer.writeheader()
         writer.writerows(rows)
+
+
+def read_plot_data(path: Path):
+    rows = []
+    with path.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            rows.append(
+                {
+                    "series": row["series"],
+                    "episode": float(row["episode"]),
+                    "win_rate": float(row["win_rate"]),
+                }
+            )
+    return rows
 
 
 def plot_rows(path: Path, rows, baseline_win_rate: float, test_role: str):
@@ -231,6 +254,15 @@ def parse_args():
     parser.add_argument("--output_dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--output_prefix", type=str, default=DEFAULT_OUTPUT_PREFIX)
     parser.add_argument(
+        "--reuse_plot_data",
+        type=Path,
+        default=None,
+        help=(
+            "Optional existing CSV produced by this script. "
+            "douzero and rlcard_baseline rows will be reused instead of re-evaluated."
+        ),
+    )
+    parser.add_argument(
         "--test_role",
         choices=["landlord", "farmer"],
         default="landlord",
@@ -263,66 +295,89 @@ def main():
     if args.output_prefix == DEFAULT_OUTPUT_PREFIX:
         args.output_prefix = "{}_{}".format(DEFAULT_OUTPUT_PREFIX, args.test_role)
 
-    approxq_series = parse_series_args(
+    model_series = parse_series_args(
         args.approxq_series, "approxq", args.approxq_dir
     )
-    douzero_points = douzero_landlord_checkpoints(
-        args.douzero_root, args.avg_steps_per_episode
-    )
-    douzero_points = limited_points(douzero_points, args.max_points)
 
-    all_approxq_points = {}
-    for label, directory in approxq_series:
+    reused_rows = read_plot_data(args.reuse_plot_data) if args.reuse_plot_data else []
+    reused_douzero_rows = [row for row in reused_rows if row["series"] == "douzero"]
+    reused_baseline_rows = [
+        row for row in reused_rows if row["series"] == "rlcard_baseline"
+    ]
+
+    all_model_points = {}
+    for label, _, directory in model_series:
         points = numeric_approxq_checkpoints(directory)
         points = limited_points(points, args.max_points)
         if not points:
             raise FileNotFoundError(
-                "No numeric ApproxQ .pkl checkpoints found under {}".format(
+                "No numeric model .pkl checkpoints found under {}".format(
                     directory
                 )
             )
-        all_approxq_points[label] = points
-    if not douzero_points:
-        raise FileNotFoundError(
-            "No landlord_weights_*.ckpt checkpoints found under {}".format(
-                args.douzero_root
-            )
-        )
+        all_model_points[label] = points
 
     eval_data_path = resolve_eval_data_path(str(args.eval_data))
     with open(eval_data_path, "rb") as f:
         card_play_data_list = pickle.load(f)
 
     rows = []
-    print("Evaluating RLCard baseline for {}".format(args.test_role))
-    baseline_win_rate = evaluate_role_win_rate(
-        card_play_data_list,
-        args.test_role,
-        "rlcard",
-        args.num_workers,
-    )
+    if reused_baseline_rows:
+        baseline_win_rate = reused_baseline_rows[0]["win_rate"]
+        print(
+            "Reusing RLCard baseline for {} from {}".format(
+                args.test_role, args.reuse_plot_data
+            )
+        )
+    else:
+        print("Evaluating RLCard baseline for {}".format(args.test_role))
+        baseline_win_rate = evaluate_role_win_rate(
+            card_play_data_list,
+            args.test_role,
+            "rlcard",
+            args.num_workers,
+        )
 
     baseline_series_name = "rlcard_baseline"
 
-    for label, directory in approxq_series:
+    for label, method_prefix, directory in model_series:
         append_series_rows(
             rows,
             label,
-            all_approxq_points[label],
-            "approxq",
+            all_model_points[label],
+            method_prefix,
             card_play_data_list,
             args.num_workers,
             args.test_role,
         )
-    append_series_rows(
-        rows,
-        "douzero",
-        douzero_points,
-        "douzero",
-        card_play_data_list,
-        args.num_workers,
-        args.test_role,
-    )
+
+    if reused_douzero_rows:
+        print(
+            "Reusing {} DouZero rows from {}".format(
+                len(reused_douzero_rows), args.reuse_plot_data
+            )
+        )
+        rows.extend(reused_douzero_rows)
+    else:
+        douzero_points = douzero_landlord_checkpoints(
+            args.douzero_root, args.avg_steps_per_episode
+        )
+        douzero_points = limited_points(douzero_points, args.max_points)
+        if not douzero_points:
+            raise FileNotFoundError(
+                "No landlord_weights_*.ckpt checkpoints found under {}".format(
+                    args.douzero_root
+                )
+            )
+        append_series_rows(
+            rows,
+            "douzero",
+            douzero_points,
+            "douzero",
+            card_play_data_list,
+            args.num_workers,
+            args.test_role,
+        )
 
     min_episode = min(row["episode"] for row in rows)
     max_episode = max(row["episode"] for row in rows)

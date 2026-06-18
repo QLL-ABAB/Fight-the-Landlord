@@ -6,6 +6,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 APPROXQ_SAVEDIR = "approx_qlearning_checkpoints/approx_qlearning"
+APPROX_DOUFEATURE_SAVEDIR = "approx_qlearning_checkpoints/approx_doufeature"
 APPROXQ_1M_HISTORY_DIR = Path(APPROXQ_SAVEDIR) / "approxq_logadp_cmp_1m_history"
 APPROXQ_1M_HISTORY_BEST_LANDLORD = APPROXQ_1M_HISTORY_DIR / "750000.pkl"
 
@@ -13,6 +14,7 @@ APPROXQ_1M_HISTORY_BEST_LANDLORD = APPROXQ_1M_HISTORY_DIR / "750000.pkl"
 @dataclass(frozen=True)
 class ApproxQTrainConfig:
     name: str
+    algorithm: str = "approxq"
     episodes: int = 1000000
     savedir: str = APPROXQ_SAVEDIR
     output: str = ""
@@ -41,7 +43,24 @@ class ApproxQTrainConfig:
     save_interval: int = 50000
 
 
-TRAIN_CONFIGS = {
+@dataclass(frozen=True)
+class ApproxDouFeatureTrainConfig(ApproxQTrainConfig):
+    algorithm: str = "approx_doufeature"
+    episodes: int = 100000
+    savedir: str = APPROX_DOUFEATURE_SAVEDIR
+    device: str = "auto"
+    feature_mode: str = "douzero"
+    max_candidate_actions: int = 0
+    log_interval: int = 1000
+    progress_interval: int = 500
+
+    update_mode: str = "td"
+    num_workers: int = 4
+    worker_episodes: int = 8
+    diag_topk: int = 20
+
+
+APPROXQ_TRAIN_CONFIGS = {
     "approxq_logadp_cmp_1m_history": ApproxQTrainConfig(
         name="approxq_logadp_cmp_1m_history",
         alpha=0.05,
@@ -88,13 +107,72 @@ TRAIN_CONFIGS = {
 }
 
 
-def get_train_config(name: str) -> ApproxQTrainConfig:
+APPROX_DOUFEATURE_TRAIN_CONFIGS = {
+    "approx_doufeature_logadp_td_1m_gamma": ApproxDouFeatureTrainConfig(
+        name="approx_doufeature_logadp_td_1m_gamma",
+        update_mode="td",
+        episodes=1000000,
+        alpha=0.01,
+        gamma=0.98,
+        reward_shaping=False,
+        num_workers=4,
+        worker_episodes=8,
+        log_interval=10000,
+        progress_interval=5000,
+        save_interval=50000,
+    ),
+    "approx_doufeature_logadp_td_1m": ApproxDouFeatureTrainConfig(
+        name="approx_doufeature_logadp_td_1m",
+        update_mode="td",
+        episodes=1000000,
+        alpha=0.01,
+        gamma=1,
+        reward_shaping=False,
+        num_workers=4,
+        worker_episodes=8,
+        log_interval=10000,
+        progress_interval=5000,
+        save_interval=50000,
+    ),
+    "approx_doufeature_logadp_mc_1m": ApproxDouFeatureTrainConfig(
+        name="approx_doufeature_logadp_mc_1m",
+        update_mode="mc",
+        episodes=1000000,
+        alpha=0.01,
+        gamma=1,
+        reward_shaping=False,
+        num_workers=4,
+        worker_episodes=8,
+        log_interval=10000,
+        progress_interval=5000,
+        save_interval=50000,
+    ),
+}
+
+
+TRAIN_CONFIGS = {
+    **APPROXQ_TRAIN_CONFIGS,
+    **APPROX_DOUFEATURE_TRAIN_CONFIGS,
+}
+
+
+def train_configs_for_algorithm(algorithm: str):
+    return {
+        name: config
+        for name, config in TRAIN_CONFIGS.items()
+        if config.algorithm == algorithm
+    }
+
+
+def get_train_config(name: str, algorithm: str | None = None) -> ApproxQTrainConfig:
+    configs = TRAIN_CONFIGS if algorithm is None else train_configs_for_algorithm(algorithm)
     try:
-        return TRAIN_CONFIGS[name]
+        return configs[name]
     except KeyError as exc:
-        available = ", ".join(sorted(TRAIN_CONFIGS))
+        available = ", ".join(sorted(configs))
+        scope = f" for {algorithm}" if algorithm else ""
         raise KeyError(
-            "Unknown train config '{}'. Available: {}".format(name, available)
+            "Unknown train config '{}'{}. Available: {}".format(name, scope, available)
         ) from exc
 
 
@@ -111,18 +189,19 @@ def override_train_config(
 
 
 def apply_train_config_to_args(args, config: ApproxQTrainConfig):
-    for field_name in ApproxQTrainConfig.__dataclass_fields__:
+    for field_name in type(config).__dataclass_fields__:
         setattr(args, field_name, getattr(config, field_name))
     return args
 
 
 def config_summary(config: ApproxQTrainConfig) -> str:
-    return (
-        "{} -> episodes={}, alpha={}, gamma={}, objective={}, "
+    common = (
+        "{} [{}] -> episodes={}, alpha={}, gamma={}, objective={}, "
         "reward_scale={}, reward_shaping={}, device={}, feature_mode={}, "
         "max_candidate_actions={}, log_interval={}, progress_interval={}, "
         "save_interval={}".format(
             config.name,
+            config.algorithm,
             config.episodes,
             config.alpha,
             config.gamma,
@@ -137,3 +216,13 @@ def config_summary(config: ApproxQTrainConfig) -> str:
             config.save_interval,
         )
     )
+    if isinstance(config, ApproxDouFeatureTrainConfig):
+        common += (
+            ", update_mode={}, num_workers={}, worker_episodes={}, diag_topk={}".format(
+                config.update_mode,
+                config.num_workers,
+                config.worker_episodes,
+                config.diag_topk,
+            )
+        )
+    return common
