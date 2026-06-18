@@ -141,6 +141,12 @@ def _approxq(position: str, model_path: str | None):
     return ApproxQLearningAgent(position, model_path)
 
 
+def _policy_gradient(position: str, model_path: str | None):
+    from douzero.evaluation.policy_gradient_agent import PolicyGradientAgent
+
+    return PolicyGradientAgent(position, model_path)
+
+
 def _search(_: str, arg: str | None):
     from douzero.evaluation.search_agent import SearchAgent
 
@@ -192,6 +198,12 @@ AGENT_SPECS = (
         ("approx_qlearning",),
         _approxq,
         description="Feature-based approximate Q-learning agent",
+    ),
+    AgentSpec(
+        "policy_gradient",
+        ("pg", "reinforce"),
+        _policy_gradient,
+        description="Linear-feature REINFORCE policy-gradient agent",
     ),
     AgentSpec("douzero", (), _douzero, description="Original DouZero DMC agent"),
     AgentSpec("search", (), _search, needs_position=False, description="Rollout search"),
