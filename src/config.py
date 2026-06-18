@@ -167,6 +167,12 @@ def _expectimax(_: str, arg: str | None):
     return ExpectimaxAgent()
 
 
+def _montecarlo(position: str, arg: str | None):
+    from douzero.evaluation.high_rank_montecarlo_agent import HighRankMonteCarloAgent
+
+    return HighRankMonteCarloAgent(position)
+
+
 def _douzero(position: str, model_path: str | None):
     from douzero.evaluation.deep_agent import DeepAgent
     from douzero.evaluation.simulation import resolve_douzero_model_path
@@ -214,6 +220,12 @@ AGENT_SPECS = (
         _expectimax,
         needs_position=False,
         description="Expectimax search agent",
+    ),
+    AgentSpec(
+        "montecarlo",
+        ("mc", "highrankmc"),
+        _montecarlo,
+        description="High-rank Monte Carlo agent (translated from Botzone C++)",
     ),
 )
 

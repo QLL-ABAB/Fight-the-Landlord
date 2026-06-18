@@ -1,6 +1,6 @@
-# bayesian_sampled_search_agent.py
+﻿# bayesian_sampled_search_agent.py
 # ------------------------------------------------------------
-# Bayesian sampled adversarial search agent with rollout leaf evaluation for Dou Dizhu.
+# Bayesian sampled shallow adversarial search agent for Dou Dizhu.
 #
 # Public interface:
 #     agent = BayesianSampledSearchAgent(position="landlord")
@@ -86,65 +86,23 @@ class AdversarialSearchAgent(object):
     """
 
     def __init__(self, position, debug=False, seed=None):
-        self.name = "BayesianSampledSearch_highrank_policy_gate_v2"
+        self.name = "BayesianSampledSearch_v1"
         self.position = position
         self.debug = debug
         self.rng = random.Random(seed)
 
         self.cfg = {
             # Search budget. Increase samples/depth if speed allows.
-            # Rollout leaf evaluation is more expensive than static evaluation,
-            # so the default sample/top-k numbers are intentionally smaller.
-            "num_samples": 120,
-            "search_depth": 3,            # root action + shallow adversarial plies; leaves use rollout
-            "time_budget_sec": 2.0,       # soft budget per act; fallback if exceeded
-            "root_topk_leading": 5,
-            "root_topk_following": 4,
-            "sim_topk_leading": 4,
-            "sim_topk_following": 3,
-            "enemy_model_width": 4,
+            "num_samples": 800,
+            "search_depth": 3,            # includes plies after root action
+            "time_budget_sec": 0.20,       # soft budget per act; fallback if exceeded
+            "root_topk_leading": 7,
+            "root_topk_following": 5,
+            "sim_topk_leading": 5,
+            "sim_topk_following": 4,
+            "enemy_model_width": 2,
             "enemy_softmax_temp": 7.0,
-            "ally_max_width": 3,
-
-            # High-rank style root policy and conservative selection gate.
-            # This makes depth=1 much closer to the high-rank Monte Carlo bot:
-            # root candidates and fallback are selected by the same decomposition utility
-            # that is used by rollout players; rollout/search only overrides when confident.
-            "use_highrank_root_policy": True,
-            "highrank_root_topn_leading": 3,
-            "highrank_root_topn_following": 3,
-            "always_include_original_pruned": False,
-            "always_include_greedy_fallback": True,
-            "use_conservative_gate": True,
-            "mc_accept_margin_vs_second": 120.0,
-            "mc_accept_margin_vs_baseline": 180.0,
-            "root_immediate_scale": 0.12,
-            "root_terminal_immediate_scale": 1.0,
-
-            # Rollout leaf evaluator.
-            # The search tree is still adversarial/expectimax-like; only the depth cutoff
-            # is replaced by a terminal rollout instead of a static hand_badness evaluation.
-            "use_rollout_leaf": True,
-            "leaf_rollout_count": 1,
-            "max_rollout_steps": 180,
-            "rollout_static_mix": 0.10,
-            "rollout_terminal_margin_weight": 18.0,
-            "rollout_policy_topk": 1,
-            "rollout_policy_softmax_temp": 6.0,
-            "rollout_use_highrank_policy": True,
-
-            # Decomposition utility used by rollout policy, inspired by high-rank Botzone bots.
-            "utility_alpha": 10.0,
-            "utility_max_actions": 42,
-            "utility_fallback_badness_weight": 1.0,
-            "rollout_utility_delta_weight": 10.0,
-            "rollout_beta_base": 1.0,
-            "rollout_enemy_danger_beta": 7.0,
-            "rollout_landlord_up_block_beta": 5.0,
-            "rollout_teammate_pass_bonus": 160.0,
-            "rollout_beat_teammate_penalty": 150.0,
-            "rollout_finish_bonus": 20000.0,
-            "rollout_bomb_nonfinish_penalty": 80.0,
+            "ally_max_width": 4,
 
             # Candidate generation limits.
             "max_generated_actions_per_state": 120,
@@ -241,14 +199,9 @@ class AdversarialSearchAgent(object):
             "fallbacks": 0,
             "samples_used": 0,
             "time_cutoffs": 0,
-            "leaf_rollouts": 0,
-            "rollout_cutoffs": 0,
-            "gate_fallbacks": 0,
-            "gate_accepts": 0,
         }
         self._deadline = None
         self._search_cache = {}
-        self._utility_cache = {}
 
     # ============================================================
     # Public API
@@ -260,7 +213,6 @@ class AdversarialSearchAgent(object):
         start_time = time.monotonic()
         self._deadline = start_time + self.cfg["time_budget_sec"]
         self._search_cache = {}
-        self._utility_cache = {}
 
         try:
             legal_actions = getattr(infoset, "legal_actions", [])
@@ -280,16 +232,7 @@ class AdversarialSearchAgent(object):
             if finish_actions:
                 return self.choose_lowest_cost_action(finish_actions, root_state)
 
-            baseline_action = self.highrank_baseline_action(legal_actions, root_state, belief)
-
-            if self.cfg.get("use_highrank_root_policy", True):
-                candidates = self.highrank_root_candidates(legal_actions, root_state, belief, baseline_action)
-                if self.cfg.get("always_include_original_pruned", False):
-                    candidates = self.merge_actions(candidates, self.prune_root_actions(legal_actions, root_state, belief))
-            else:
-                candidates = self.prune_root_actions(legal_actions, root_state, belief)
-                candidates = self.merge_actions([baseline_action], candidates)
-
+            candidates = self.prune_root_actions(legal_actions, root_state, belief)
             if not candidates:
                 return self.greedy_fallback_action(legal_actions, root_state, belief)
 
@@ -297,18 +240,24 @@ class AdversarialSearchAgent(object):
             if not samples:
                 return self.greedy_fallback_action(legal_actions, root_state, belief)
 
-            evaluated = []
+            best_value = -float("inf")
+            best_actions = []
+
             for action in candidates:
                 if self.time_exceeded():
                     self.stats["time_cutoffs"] += 1
                     break
                 value = self.evaluate_root_action(action, root_state, belief, samples)
-                evaluated.append((value, action))
+                if value > best_value:
+                    best_value = value
+                    best_actions = [action]
+                elif value == best_value:
+                    best_actions.append(action)
 
-            if not evaluated:
+            if not best_actions:
                 return self.greedy_fallback_action(legal_actions, root_state, belief)
 
-            chosen = self.select_with_conservative_gate(evaluated, baseline_action, root_state)
+            chosen = self.choose_lowest_cost_action(best_actions, root_state)
             if chosen not in legal_actions:
                 return self.greedy_fallback_action(legal_actions, root_state, belief)
             return chosen
@@ -326,193 +275,6 @@ class AdversarialSearchAgent(object):
                 except Exception:
                     return random.choice(legal_actions)
             return []
-
-    # ============================================================
-    # High-rank style root policy and conservative selection
-    # ============================================================
-
-    def merge_actions(self, *action_lists):
-        merged = []
-        seen = set()
-        for actions in action_lists:
-            if actions is None:
-                continue
-            for a in actions:
-                key = tuple(a) if isinstance(a, list) else a
-                if key not in seen:
-                    seen.add(key)
-                    merged.append(a)
-        return merged
-
-    def scale_root_immediate(self, score, terminal=False):
-        if terminal:
-            return score * float(self.cfg.get("root_terminal_immediate_scale", 1.0))
-        return score * float(self.cfg.get("root_immediate_scale", 0.12))
-
-    def highrank_baseline_action(self, legal_actions, state, belief):
-        """Stable high-rank-style heuristic baseline used by the gate."""
-        pass_legal = [] in legal_actions
-        non_pass = [a for a in legal_actions if a != []]
-        if not non_pass:
-            return [] if pass_legal else random.choice(legal_actions)
-
-        finish = [a for a in non_pass if len(self.env_cards_to_real_str(a)) == state["my_count"]]
-        if finish:
-            return self.choose_lowest_cost_action(finish, state)
-
-        scored = []
-        for a in legal_actions:
-            if a == [] and state["leading_round"]:
-                continue
-            scored.append((self.highrank_root_action_score(a, state, belief), a))
-        if not scored:
-            return self.greedy_fallback_action(legal_actions, state, belief)
-        scored.sort(key=lambda x: x[0], reverse=True)
-        best_score = scored[0][0]
-        best = [a for s, a in scored if s == best_score]
-        return self.choose_lowest_cost_action(best, state)
-
-    def highrank_root_candidates(self, legal_actions, state, belief, baseline_action=None):
-        """Top-N root actions selected by the same decomposition utility as rollout."""
-        scored = []
-        for a in legal_actions:
-            if a == [] and state["leading_round"]:
-                continue
-            scored.append((self.highrank_root_action_score(a, state, belief), a))
-        scored.sort(key=lambda x: x[0], reverse=True)
-
-        k = self.cfg["highrank_root_topn_leading"] if state["leading_round"] else self.cfg["highrank_root_topn_following"]
-        chosen = [a for _, a in scored[:k]]
-
-        # Always include direct finish and the stable baseline.
-        for a in legal_actions:
-            if a != [] and len(self.env_cards_to_real_str(a)) == state["my_count"]:
-                chosen.insert(0, a)
-        if self.cfg.get("always_include_greedy_fallback", True) and baseline_action is not None:
-            chosen.insert(0, baseline_action)
-
-        # In emergency follow positions, make sure pass is not the only candidate.
-        if not state["leading_round"] and self.is_enemy_last_player(state) and state["dangerous"]:
-            best_nonpass = [a for _, a in scored if a != []][:max(k, 2)]
-            chosen = best_nonpass + chosen
-
-        return self.merge_actions(chosen)
-
-    def highrank_root_action_score(self, action, state, belief):
-        """
-        Root policy close to the high-rank Monte Carlo bot:
-            10 * (utility(hand - action) - utility(hand)) + beta * main_rank
-        plus explicit farmer cooperation and emergency blocking rules.
-        """
-        hand = state["my_hand"]
-
-        if action == []:
-            if state["leading_round"]:
-                return -1e9
-            if self.is_teammate_last_player(state):
-                teammate_left = state.get("teammate_cards") or 17
-                return self.cfg.get("rollout_teammate_pass_bonus", 160.0) + max(0, 3 - teammate_left) * 90.0
-            score = -10.0
-            if self.is_enemy_last_player(state):
-                score -= 60.0
-                if state["dangerous"]:
-                    score -= 260.0
-            return score
-
-        a_str = self.env_cards_to_real_str(action)
-        if not a_str or not self.can_remove(hand, a_str):
-            return -1e9
-        next_hand = self.remove_action_from_hand(hand, a_str)
-        if next_hand == "":
-            return self.cfg.get("rollout_finish_bonus", 20000.0)
-
-        a_type, _ = self.get_card_type(a_str)
-        cur_u = self.hand_utility(hand, alpha=self.cfg.get("utility_alpha", 10.0))
-        next_u = self.hand_utility(next_hand, alpha=self.cfg.get("utility_alpha", 10.0))
-        score = self.cfg.get("rollout_utility_delta_weight", 10.0) * (next_u - cur_u)
-
-        beta = self.cfg.get("rollout_beta_base", 1.0)
-        if state["dangerous"]:
-            beta += self.cfg.get("rollout_enemy_danger_beta", 7.0)
-        # landlord_up is the last farmer before landlord; block landlord more aggressively.
-        if self.position == "landlord_up" and self.is_enemy_last_player(state):
-            beta += self.cfg.get("rollout_landlord_up_block_beta", 5.0)
-        score += beta * self.rank_index_value(a_str)
-
-        if not state["leading_round"]:
-            if self.is_teammate_last_player(state):
-                score -= self.cfg.get("rollout_beat_teammate_penalty", 150.0)
-            elif self.is_enemy_last_player(state):
-                score += 35.0
-                if state["dangerous"]:
-                    score += 140.0
-
-        # Farmer release rules when leading.
-        if state["leading_round"] and self.position != "landlord":
-            teammate_left = state.get("teammate_cards")
-            counts = Counter(a_str)
-            if teammate_left == 1 and len(a_str) == 1:
-                score += 260.0 - 8.0 * self.rank_index_value(a_str)
-            elif teammate_left == 2 and len(a_str) == 2 and counts and max(counts.values()) == 2:
-                score += 180.0 - 5.0 * self.rank_index_value(a_str)
-
-        if state["leading_round"]:
-            if self.min_card(hand) in a_str:
-                score += self.cfg.get("lead_min_card_bonus", 10.0)
-            if len(a_str) == 1:
-                score -= self.cfg.get("lead_single_rank_penalty", 0.55) * self.main_rank_value(a_str)
-
-        if self.is_bomb_or_rocket(a_type) and next_hand != "":
-            if state["dangerous"] and self.is_enemy_last_player(state):
-                score += 60.0
-            else:
-                score -= self.cfg.get("rollout_bomb_nonfinish_penalty", 80.0)
-
-        score -= self.control_cost(a_str, {"dangerous": state.get("dangerous", False)})
-        if belief is not None and next_hand != "":
-            score -= 2.0 * self.estimate_beaten_risk(a_str, a_type, belief)
-        return score
-
-    def select_with_conservative_gate(self, evaluated, baseline_action, state):
-        """
-        High-rank style conservative gate.
-        Search/rollout overrides the baseline only when the advantage is clear.
-        """
-        evaluated = sorted(evaluated, key=lambda x: x[0], reverse=True)
-        best_value, best_action = evaluated[0]
-        second_value = evaluated[1][0] if len(evaluated) >= 2 else -float("inf")
-
-        baseline_value = None
-        baseline_key = tuple(baseline_action) if isinstance(baseline_action, list) else baseline_action
-        for v, a in evaluated:
-            key = tuple(a) if isinstance(a, list) else a
-            if key == baseline_key:
-                baseline_value = v
-                break
-
-        if not self.cfg.get("use_conservative_gate", True):
-            self.stats["gate_accepts"] += 1
-            bests = [a for v, a in evaluated if v == best_value]
-            return self.choose_lowest_cost_action(bests, state)
-
-        if baseline_action is not None and tuple(best_action) == baseline_key:
-            self.stats["gate_accepts"] += 1
-            return best_action
-
-        accept = False
-        if best_value - second_value >= self.cfg.get("mc_accept_margin_vs_second", 120.0):
-            accept = True
-        if baseline_value is not None and best_value - baseline_value >= self.cfg.get("mc_accept_margin_vs_baseline", 180.0):
-            accept = True
-        # If baseline was not evaluated for some unexpected reason, be conservative.
-
-        if accept:
-            self.stats["gate_accepts"] += 1
-            bests = [a for v, a in evaluated if v == best_value]
-            return self.choose_lowest_cost_action(bests, state)
-
-        self.stats["gate_fallbacks"] += 1
-        return baseline_action if baseline_action is not None else self.choose_lowest_cost_action([a for _, a in evaluated], state)
 
     # ============================================================
     # Root action evaluation
@@ -556,7 +318,7 @@ class AdversarialSearchAgent(object):
                     score += self.cfg["root_pass_enemy_danger_penalty"]
             if state["leading_round"]:
                 score -= 1e5
-            return self.scale_root_immediate(score, terminal=False)
+            return score
 
         action_str = self.env_cards_to_real_str(action)
         if not action_str:
@@ -587,7 +349,7 @@ class AdversarialSearchAgent(object):
         risk = self.estimate_beaten_risk(action_str, action_type, belief)
         if next_hand != "":
             score -= self.cfg["root_risk_weight"] * risk
-        return self.scale_root_immediate(score, terminal=(next_hand == ""))
+        return score
 
     # ============================================================
     # Shallow adversarial/team search
@@ -598,12 +360,7 @@ class AdversarialSearchAgent(object):
         if winner is not None:
             return self.terminal_value(winner)
 
-        if depth <= 0:
-            if self.cfg.get("use_rollout_leaf", True) and not self.time_exceeded():
-                return self.rollout_leaf_value(sim)
-            return self.evaluate_sim_state(sim)
-
-        if self.time_exceeded():
+        if depth <= 0 or self.time_exceeded():
             return self.evaluate_sim_state(sim)
 
         key = (sim, depth)
@@ -693,310 +450,6 @@ class AdversarialSearchAgent(object):
             val += sign * self.cfg["eval_control_bonus"] * self.control_count(hands[p])
 
         return val
-
-    # ============================================================
-    # Rollout leaf evaluator
-    # ============================================================
-
-    def rollout_leaf_value(self, sim):
-        """
-        Leaf evaluator for the shallow adversarial search.
-
-        This keeps the method an adversarial/expectimax-style search at the top:
-        self/team nodes still maximize and enemy nodes still use a softmax model.
-        The only change is at the depth cutoff: instead of immediately using the
-        static evaluate_sim_state(), we run a cheap heuristic rollout to terminal
-        and use terminal win/loss as a stronger value signal.
-        """
-        if self.time_exceeded():
-            return self.evaluate_sim_state(sim)
-
-        total = 0.0
-        used = 0
-        rollout_count = max(1, int(self.cfg.get("leaf_rollout_count", 1)))
-
-        for _ in range(rollout_count):
-            if self.time_exceeded():
-                self.stats["rollout_cutoffs"] += 1
-                break
-            end_sim, winner = self.rollout_to_terminal(sim)
-            if winner is None:
-                val = self.evaluate_sim_state(end_sim)
-            else:
-                val = self.terminal_value(winner) + self.terminal_margin_bonus(end_sim)
-            total += val
-            used += 1
-
-        if used == 0:
-            return self.evaluate_sim_state(sim)
-
-        self.stats["leaf_rollouts"] += used
-        rollout_value = total / used
-        mix = float(self.cfg.get("rollout_static_mix", 0.0))
-        if mix <= 0:
-            return rollout_value
-        return (1.0 - mix) * rollout_value + mix * self.evaluate_sim_state(sim)
-
-    def rollout_to_terminal(self, sim):
-        """Run a single-line heuristic rollout until someone finishes or time/step limit hits."""
-        cur = sim
-        max_steps = int(self.cfg.get("max_rollout_steps", 180))
-
-        for _ in range(max_steps):
-            winner = self.terminal_winner(cur)
-            if winner is not None:
-                return cur, winner
-            if self.time_exceeded():
-                return cur, None
-
-            action = self.rollout_policy(cur)
-            if action is None:
-                return cur, None
-
-            # Safety: rollout_policy should always return a legal action, but do not
-            # let one bad heuristic choice corrupt the whole search.
-            if not self.can_apply_action(cur, cur.current_player, action):
-                legal = self.legal_actions_for_sim(cur)
-                if not legal:
-                    return cur, None
-                action = self.choose_safe_rollout_fallback(legal, cur)
-
-            cur = self.apply_action(cur, action)
-
-        return cur, self.terminal_winner(cur)
-
-    def terminal_margin_bonus(self, sim):
-        """Small terminal margin: winning with opponents holding more cards is better."""
-        hands = self.tuple_to_hands(sim.hands_tuple)
-        team_counts = [len(h) for p, h in hands.items() if self.same_team(p, self.position)]
-        enemy_counts = [len(h) for p, h in hands.items() if not self.same_team(p, self.position)]
-        if not team_counts or not enemy_counts:
-            return 0.0
-        return self.cfg.get("rollout_terminal_margin_weight", 0.0) * (min(enemy_counts) - min(team_counts))
-
-    def rollout_policy(self, sim):
-        """
-        Heuristic policy used only after the adversarial search reaches a leaf.
-
-        It is intentionally player-role aware:
-        - farmers usually do not beat a teammate;
-        - farmers try to release a teammate with 1 card;
-        - players become more aggressive when an enemy is nearly out;
-        - bombs/rocket are preserved unless finishing or blocking danger.
-        """
-        actions = self.legal_actions_for_sim(sim)
-        if not actions:
-            return ""
-
-        hands = self.tuple_to_hands(sim.hands_tuple)
-        player = sim.current_player
-        hand = hands[player]
-
-        # Direct finish dominates every rollout policy rule.
-        finish_actions = [a for a in actions if a and len(a) == len(hand)]
-        if finish_actions:
-            return min(finish_actions, key=lambda a: self.action_cost(a, {"dangerous": True}))
-
-        # Farmer cooperation: if teammate currently owns the trick, normally pass.
-        if sim.last_move != "" and "" in actions and sim.last_pid is not None and self.same_team(player, sim.last_pid):
-            teammate_cards = len(hands.get(sim.last_pid, ""))
-            if teammate_cards <= self.cfg.get("teammate_release_cards", 2):
-                return ""
-
-        scored = [(self.rollout_action_score(a, sim), a) for a in actions]
-        scored.sort(key=lambda x: x[0], reverse=True)
-
-        topk = max(1, int(self.cfg.get("rollout_policy_topk", 1)))
-        if topk <= 1 or len(scored) == 1:
-            return scored[0][1]
-
-        top = scored[:topk]
-        weights = self.softmax([x[0] for x in top], temp=self.cfg.get("rollout_policy_softmax_temp", 6.0))
-        r = self.rng.random()
-        acc = 0.0
-        for w, (_, a) in zip(weights, top):
-            acc += w
-            if r <= acc:
-                return a
-        return top[0][1]
-
-    def choose_safe_rollout_fallback(self, actions, sim):
-        if sim.last_move != "" and "" in actions:
-            return ""
-        non_pass = [a for a in actions if a]
-        if not non_pass:
-            return ""
-        return min(non_pass, key=lambda a: self.action_cost(a, {"dangerous": False}))
-
-    def rollout_action_score(self, action_str, sim):
-        hands = self.tuple_to_hands(sim.hands_tuple)
-        player = sim.current_player
-        hand = hands[player]
-
-        if action_str == "":
-            if sim.last_move == "":
-                return -1e9
-            if sim.last_pid is not None and self.same_team(player, sim.last_pid):
-                # Do not steal teammate's control, especially if teammate is close to out.
-                teammate_left = len(hands.get(sim.last_pid, ""))
-                return self.cfg.get("rollout_teammate_pass_bonus", 160.0) + max(0, 3 - teammate_left) * 80.0
-            # Passing against an enemy is bad when that enemy is dangerous.
-            if sim.last_pid is not None and not self.same_team(player, sim.last_pid):
-                enemy_left = len(hands.get(sim.last_pid, ""))
-                if enemy_left <= self.cfg.get("danger_cards", 2):
-                    return -240.0
-            return -5.0
-
-        if not self.can_remove(hand, action_str):
-            return -1e9
-
-        next_hand = self.remove_action_from_hand(hand, action_str)
-        if next_hand == "":
-            return self.cfg.get("rollout_finish_bonus", 20000.0)
-
-        a_type, _ = self.get_card_type(action_str)
-        beta = self.cfg.get("rollout_beta_base", 1.0)
-
-        enemy_positions = [p for p in ALL_POSITIONS if not self.same_team(p, player)]
-        enemy_min = min((len(hands[p]) for p in enemy_positions), default=17)
-        enemy_danger = enemy_min <= self.cfg.get("danger_cards", 2)
-
-        if enemy_danger:
-            beta += self.cfg.get("rollout_enemy_danger_beta", 7.0)
-
-        # Landlord-up is the last farmer before the landlord gets another turn;
-        # if landlord's current trick survived to this player, blocking is valuable.
-        if player == "landlord_up" and sim.last_pid == "landlord":
-            beta += self.cfg.get("rollout_landlord_up_block_beta", 5.0)
-
-        # If current trick belongs to teammate, beating it is usually bad.
-        teammate_penalty = 0.0
-        if sim.last_move != "" and sim.last_pid is not None and self.same_team(player, sim.last_pid):
-            teammate_penalty += self.cfg.get("rollout_beat_teammate_penalty", 150.0)
-
-        cur_u = self.hand_utility(hand, alpha=self.cfg.get("utility_alpha", 10.0))
-        next_u = self.hand_utility(next_hand, alpha=self.cfg.get("utility_alpha", 10.0))
-        score = self.cfg.get("rollout_utility_delta_weight", 10.0) * (next_u - cur_u)
-        score += beta * self.rank_index_value(action_str)
-        score -= teammate_penalty
-
-        # Leading farmer cooperation: send teammate out with a small single/pair.
-        if sim.last_move == "" and player != "landlord":
-            teammate = "landlord_up" if player == "landlord_down" else "landlord_down"
-            teammate_left = len(hands.get(teammate, ""))
-            counts = Counter(action_str)
-            if teammate_left == 1 and len(action_str) == 1:
-                score += 260.0 - 8.0 * self.rank_index_value(action_str)
-            elif teammate_left == 2 and len(action_str) == 2 and counts and max(counts.values()) == 2:
-                score += 180.0 - 5.0 * self.rank_index_value(action_str)
-
-        if sim.last_move == "":
-            if action_str and self.min_card(hand) in action_str:
-                score += self.cfg.get("lead_min_card_bonus", 10.0)
-            if len(action_str) == 1:
-                score -= self.cfg.get("lead_single_rank_penalty", 0.55) * self.main_rank_value(action_str)
-
-        if self.is_bomb_or_rocket(a_type) and next_hand != "":
-            if enemy_danger and sim.last_pid is not None and not self.same_team(player, sim.last_pid):
-                score += 60.0
-            else:
-                score -= self.cfg.get("rollout_bomb_nonfinish_penalty", 80.0)
-
-        score -= self.control_cost(action_str, {"dangerous": enemy_danger})
-        return score
-
-    def hand_utility(self, hand_str, alpha=None):
-        """
-        Recursive decomposition utility. Higher is better.
-
-        This is a Python adaptation of the important idea in high-rank Botzone
-        heuristic bots: evaluate a hand by its best decomposition rather than only
-        by singles/pairs/counts. It is deliberately capped by utility_max_actions
-        and cached, because it runs inside rollouts.
-        """
-        hand_str = self.sort_card_str(hand_str)
-        if alpha is None:
-            alpha = self.cfg.get("utility_alpha", 10.0)
-        key = (hand_str, float(alpha))
-        if key in self._utility_cache:
-            return self._utility_cache[key]
-
-        if not hand_str:
-            return 80.0
-        if self.time_exceeded():
-            return -self.cfg.get("utility_fallback_badness_weight", 1.0) * self.hand_badness(hand_str)
-
-        # Static fallback keeps the recursion stable when all candidate decompositions
-        # are bad or when action generation is sparse.
-        best = -self.cfg.get("utility_fallback_badness_weight", 1.0) * self.hand_badness(hand_str)
-
-        actions = self.generate_actions_from_hand(hand_str)
-        actions = [a for a in actions if a and self.can_remove(hand_str, a)]
-        actions.sort(key=self.combo_static_order_score, reverse=True)
-        actions = actions[: int(self.cfg.get("utility_max_actions", 42))]
-
-        for a in actions:
-            next_hand = self.remove_action_from_hand(hand_str, a)
-            combo_value = self.combo_utility_value(a, alpha)
-            val = combo_value + self.hand_utility(next_hand, alpha)
-            if val > best:
-                best = val
-
-        self._utility_cache[key] = best
-        return best
-
-    def combo_static_order_score(self, action_str):
-        a_type, _ = self.get_card_type(action_str)
-        norm = self.normalize_type(a_type)
-        score = 0.0
-        if norm == "rocket":
-            score += 1000.0
-        elif norm == "bomb":
-            score += 800.0
-        elif "trio_chain" in norm or norm == "trio_chain":
-            score += 450.0
-        elif "pair_chain" in norm or norm == "pair_chain":
-            score += 360.0
-        elif "solo_chain" in norm or norm == "solo_chain":
-            score += 320.0
-        elif norm == "trio":
-            score += 220.0
-        elif norm == "pair":
-            score += 120.0
-        elif norm == "solo":
-            score += 20.0
-        return score + 5.0 * len(action_str) + self.rank_index_value(action_str)
-
-    def combo_utility_value(self, action_str, alpha):
-        a_type, _ = self.get_card_type(action_str)
-        norm = self.normalize_type(a_type)
-        rank = self.rank_index_value(action_str)
-        length = len(action_str)
-
-        if norm == "rocket":
-            return 15.0
-        if norm == "bomb":
-            # Bombs are special: strong control plus a move, so do not subtract alpha fully.
-            return 8.0 + rank
-
-        value = rank + 0.6 * length - alpha
-        if norm in ["solo_chain", "pair_chain", "trio_chain"]:
-            value += 3.0 + 0.4 * length
-        elif norm == "trio":
-            value += 2.0
-        elif norm == "pair":
-            value += 0.8
-        elif norm == "solo":
-            value -= 1.2
-        return value
-
-    def rank_index_value(self, action_str):
-        if not action_str:
-            return -1
-        counts = Counter(action_str)
-        max_count = max(counts.values())
-        main_cards = [c for c, cnt in counts.items() if cnt == max_count]
-        return max(INDEX[c] for c in main_cards if c in INDEX)
 
     # ============================================================
     # Simulation mechanics
@@ -1189,31 +642,29 @@ class AdversarialSearchAgent(object):
         return score
 
     def sim_action_policy_score(self, action_str, sim, root_team_node):
-        # Use the same high-rank-style policy for pruning internal nodes and for
-        # rollout players.  This makes the shallow adversarial search and the
-        # terminal rollout evaluate positions under a consistent model of how
-        # reasonable players continue the game.
-        if self.cfg.get("rollout_use_highrank_policy", True):
-            return self.rollout_action_score(action_str, sim)
-
         hands = self.tuple_to_hands(sim.hands_tuple)
         player = sim.current_player
         hand = hands[player]
 
         if action_str == "":
+            # For the side to move, passing teammate/self is sometimes okay;
+            # enemy tends to pass if response is costly.
             if sim.last_pid is not None and self.same_team(player, sim.last_pid):
                 return 80.0
             return -5.0
 
         if sim.last_move == "":
+            # Leading action.
             return self.leading_action_score(action_str, hand, belief=None)
 
+        # Following action.
         a_type, _ = self.get_card_type(action_str)
         last_type, _ = self.get_card_type(sim.last_move)
         score = -self.action_cost(action_str, {"dangerous": self.player_is_dangerous_enemy(sim, player)})
         if self.normalize_type(a_type) == self.normalize_type(last_type):
             score += self.cfg["follow_same_type_bonus"]
         if self.is_bomb_or_rocket(a_type):
+            # Bomb if enemy/root team is dangerous; otherwise preserve it.
             if self.any_enemy_of_player_dangerous(sim, player):
                 score += 50.0
             else:
@@ -2026,3 +1477,304 @@ class AdversarialSearchAgent(object):
 
     def time_exceeded(self):
         return self._deadline is not None and time.monotonic() > self._deadline
+
+# ============================================================
+# Botzeno/Botzone single-file adapter
+# ============================================================
+
+import json
+import sys
+
+CARD_ID_TO_ENV_RANK = {}
+for card_id in range(0, 52):
+    raw_rank = card_id // 4 + 3
+    CARD_ID_TO_ENV_RANK[card_id] = 17 if raw_rank == 15 else raw_rank
+CARD_ID_TO_ENV_RANK[52] = 20
+CARD_ID_TO_ENV_RANK[53] = 30
+
+
+class SimpleInfoset:
+    def __init__(
+        self,
+        position,
+        player_hand_cards,
+        last_move,
+        last_two_moves,
+        legal_actions,
+        last_pid,
+        num_cards_left_dict,
+        card_play_action_seq,
+        played_cards,
+        three_landlord_cards,
+    ):
+        self.player_position = position
+        self.player_hand_cards = player_hand_cards
+        self.last_move = last_move
+        self.last_two_moves = last_two_moves
+        self.legal_actions = legal_actions
+        self.last_pid = last_pid
+        self.num_cards_left_dict = num_cards_left_dict
+        self.card_play_action_seq = card_play_action_seq
+        self.played_cards = played_cards
+        self.three_landlord_cards = three_landlord_cards
+
+
+def card_id_to_env_rank(card_id):
+    return CARD_ID_TO_ENV_RANK[int(card_id)]
+
+
+def card_ids_to_env_ranks(card_ids):
+    return sorted(card_id_to_env_rank(card_id) for card_id in card_ids)
+
+
+def env_action_to_card_ids(env_cards, available_cards):
+    buckets = {}
+    for card_id in available_cards:
+        rank = card_id_to_env_rank(card_id)
+        buckets.setdefault(rank, []).append(card_id)
+
+    for ids in buckets.values():
+        ids.sort()
+
+    result = []
+    for rank in sorted(env_cards):
+        ids = buckets.get(rank)
+        if not ids:
+            raise ValueError("cannot map env card %r back to raw card ids" % rank)
+        result.append(ids.pop(0))
+    return sorted(result)
+
+
+def env_action_to_real_str(action):
+    return "".join(sorted((EnvCard2RealCard[c] for c in action), key=lambda x: INDEX[x]))
+
+
+def real_str_to_env_action(action_str):
+    return sorted(RealCard2EnvCard[c] for c in action_str)
+
+
+def bot_position(pos, landlord):
+    if isinstance(pos, str) and pos in ALL_POSITIONS:
+        return pos
+    try:
+        pos = int(pos)
+        landlord = int(landlord)
+    except Exception:
+        return "landlord"
+    if pos == landlord:
+        return "landlord"
+    if pos == (landlord + 1) % 3:
+        return "landlord_down"
+    return "landlord_up"
+
+
+def player_id_for_history_index(index, landlord):
+    return (int(landlord) + index) % 3
+
+
+def generate_legal_actions(position, hand_cards, env_history):
+    helper = AdversarialSearchAgent(position, seed=0)
+    hand_str = helper.env_cards_to_real_str(hand_cards)
+    action_strs = helper.generate_actions_from_hand(hand_str)
+
+    last_move = []
+    if env_history:
+        if env_history[-1] == [] and len(env_history) >= 2:
+            last_move = env_history[-2]
+        else:
+            last_move = env_history[-1]
+
+    if not last_move:
+        legal_strs = action_strs
+    else:
+        last_str = env_action_to_real_str(last_move)
+        legal_strs = [a for a in action_strs if helper.can_beat(a, last_str)]
+        legal_strs.append("")
+
+    legal_actions = []
+    seen = set()
+    for action_str in legal_strs:
+        action = [] if action_str == "" else real_str_to_env_action(action_str)
+        key = tuple(action)
+        if key not in seen:
+            seen.add(key)
+            legal_actions.append(action)
+    return legal_actions
+
+
+def choose_bid(own_cards, bid_history):
+    hand_cards = card_ids_to_env_ranks(own_cards)
+    counts = Counter(hand_cards)
+    current = max([0] + [int(x) for x in bid_history])
+    score = 0
+    if counts[20] and counts[30]:
+        score += 4
+    score += sum(1 for v in counts.values() if v >= 4) * 2
+    score += sum(1 for card in hand_cards if card >= 14)
+    score += sum(1 for v in counts.values() if v >= 3)
+
+    desired = 0
+    if score >= 8:
+        desired = 3
+    elif score >= 5:
+        desired = 2
+    elif score >= 2:
+        desired = 1
+    return desired if desired > current else 0
+
+
+def parse_judge_request(payload):
+    content = payload.get("content", {})
+    if not isinstance(content, dict) or not content:
+        raise ValueError("missing content")
+    player_key = next(iter(content.keys()))
+    data = content[player_key]
+    if not isinstance(data, dict):
+        raise ValueError("content payload must be an object")
+    return data, []
+
+
+def parse_botzone_full_input(payload):
+    requests = payload.get("requests", [])
+    responses = payload.get("responses", [])
+    if not requests:
+        raise ValueError("missing requests")
+
+    current = dict(requests[-1])
+    for req in requests:
+        for key in ["own", "publiccard", "landlord", "pos", "finalbid"]:
+            if key in req and key not in current:
+                current[key] = req[key]
+
+    history = []
+    for idx, response in enumerate(responses):
+        if isinstance(response, list) and idx < len(requests) and "landlord" in requests[idx]:
+            history.append(response)
+    for move in current.get("history", []):
+        if isinstance(move, list):
+            history.append(move)
+    current["history"] = history
+    return current, responses
+
+
+def reconstruct_hand(data, responses):
+    own_cards = list(data.get("own", []))
+    if data.get("publiccard") and data.get("pos") == data.get("landlord"):
+        for card_id in data.get("publiccard", []):
+            if card_id not in own_cards:
+                own_cards.append(card_id)
+    for response in responses:
+        if isinstance(response, list):
+            for card_id in response:
+                if card_id in own_cards:
+                    own_cards.remove(card_id)
+    return sorted(own_cards)
+
+
+def played_cards_by_position(history, landlord):
+    played = {pos: [] for pos in ALL_POSITIONS}
+    for idx, move in enumerate(history):
+        pos = bot_position(player_id_for_history_index(idx, landlord), landlord)
+        played[pos].extend(card_ids_to_env_ranks(move))
+    return played
+
+
+def num_cards_left(position, hand_cards, history, landlord):
+    counts = {"landlord": 20, "landlord_down": 17, "landlord_up": 17}
+    counts[position] = len(hand_cards)
+    for idx, move in enumerate(history):
+        pos = bot_position(player_id_for_history_index(idx, landlord), landlord)
+        if pos != position:
+            counts[pos] = max(0, counts[pos] - len(move))
+    return counts
+
+
+def last_pid_from_history(history, landlord):
+    for idx in range(len(history) - 1, -1, -1):
+        if history[idx]:
+            return bot_position(player_id_for_history_index(idx, landlord), landlord)
+    return None
+
+
+def build_infoset(data, responses):
+    raw_hand = reconstruct_hand(data, responses)
+    hand_cards = card_ids_to_env_ranks(raw_hand)
+    history = data.get("history", [])
+    if not isinstance(history, list):
+        history = []
+    env_history = [card_ids_to_env_ranks(move) for move in history]
+
+    last_move = []
+    if env_history:
+        if env_history[-1] == [] and len(env_history) >= 2:
+            last_move = env_history[-2]
+        else:
+            last_move = env_history[-1]
+
+    if len(env_history) >= 2:
+        last_two_moves = [env_history[-2], env_history[-1]]
+    elif len(env_history) == 1:
+        last_two_moves = [[], env_history[-1]]
+    else:
+        last_two_moves = [[], []]
+
+    landlord = data.get("landlord", 0)
+    position = bot_position(data.get("position", data.get("pos", landlord)), landlord)
+    legal_actions = generate_legal_actions(position, hand_cards, env_history)
+    return SimpleInfoset(
+        position=position,
+        player_hand_cards=hand_cards,
+        last_move=last_move,
+        last_two_moves=last_two_moves,
+        legal_actions=legal_actions,
+        last_pid=last_pid_from_history(history, landlord),
+        num_cards_left_dict=num_cards_left(position, hand_cards, history, landlord),
+        card_play_action_seq=env_history,
+        played_cards=played_cards_by_position(history, landlord),
+        three_landlord_cards=card_ids_to_env_ranks(data.get("publiccard", [])),
+    ), raw_hand
+
+
+def act_from_data(data, responses):
+    if "own" not in data:
+        raise ValueError("missing own cards")
+
+    is_bidding = (
+        "publiccard" not in data
+        and "landlord" not in data
+        and "finalbid" not in data
+        and not data.get("history")
+    )
+    if is_bidding:
+        return choose_bid(list(data.get("own", [])), data.get("bid", []))
+
+    infoset, raw_hand = build_infoset(data, responses)
+    agent = AdversarialSearchAgent(infoset.player_position, seed=0)
+    agent.cfg["num_samples"] = 80
+    agent.cfg["time_budget_sec"] = 0.12
+    agent.cfg["search_depth"] = 2
+    action_env = agent.act(infoset)
+    if action_env not in infoset.legal_actions:
+        action_env = [] if [] in infoset.legal_actions else infoset.legal_actions[0]
+    return env_action_to_card_ids(action_env, raw_hand)
+
+
+def act_from_payload(payload):
+    if "requests" in payload:
+        data, responses = parse_botzone_full_input(payload)
+    else:
+        data, responses = parse_judge_request(payload)
+    return act_from_data(data, responses)
+
+
+def main():
+    raw = sys.stdin.read().strip().lstrip("\ufeff")
+    if not raw:
+        return
+    payload = json.loads(raw)
+    response = act_from_payload(payload)
+    sys.stdout.write(json.dumps({"verdict": "OK", "response": response}, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()
