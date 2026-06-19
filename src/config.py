@@ -166,6 +166,18 @@ def _expectimax(_: str, arg: str | None):
         return ExpectimaxAgent(int(parts[0]))
     return ExpectimaxAgent()
 
+def _nnpolicy(position: str, arg: str | None):
+    from douzero.evaluation.nn_policy_agent import NeuralPolicyAgent
+
+    # 使用方式：
+    # nnpolicy:selfplay_policy_weights/weights.json
+    weights_path = arg if arg else None
+
+    return NeuralPolicyAgent(
+        position=position,
+        weights_path=weights_path,
+        concrete=False,
+    )
 
 def _montecarlo(position: str, arg: str | None):
     from douzero.evaluation.high_rank_montecarlo_agent import HighRankMonteCarloAgent
@@ -211,6 +223,12 @@ AGENT_SPECS = (
         ("approxdou", "approxdf"),
         _approx_doufeature,
         description="Linear ApproxQ with original DouZero x/z features",
+    ),
+    AgentSpec(
+        "nnpolicy",
+        ("nn", "neural", "policy"),
+        _nnpolicy,
+        description="Self-play neural policy-gradient action scorer",
     ),
     AgentSpec("douzero", (), _douzero, description="Original DouZero DMC agent"),
     AgentSpec("search", (), _search, needs_position=False, description="Rollout search"),

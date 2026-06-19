@@ -14,245 +14,201 @@
   "evaluate_name": "probability_vs_rlcard_rotate",
   "mode": "rotate",
   "methods": [
-    "montecarlo",
+    "nnpolicy:role_policy_weights.json",
     "rlcard",
-    "adversarial"
+    "rlcard"
   ],
   "raw_methods": [
-    "montecarlo",
+    "nnpolicy:role_policy_weights.json",
     "rlcard",
-    "adversarial"
+    "rlcard"
   ],
   "eval_data": "D:\\skd\\CS181\\project\\Fight-the-Landlord\\eval_data.pkl",
   "num_workers": 5,
   "assignment_workers": 3,
   "summary": {
-    "montecarlo": {
-      "games": 300,
-      "wins": 213,
-      "landlord_games": 100,
-      "landlord_wins": 73,
-      "farmer_games": 200,
-      "farmer_wins": 140,
-      "overall_win_rate": 0.71,
-      "landlord_win_rate": 0.73,
-      "farmer_win_rate": 0.7
+    "nnpolicy:role_policy_weights.json": {
+      "games": 3000,
+      "wins": 1891,
+      "landlord_games": 1000,
+      "landlord_wins": 696,
+      "farmer_games": 2000,
+      "farmer_wins": 1195,
+      "overall_win_rate": 0.6303333333333333,
+      "landlord_win_rate": 0.696,
+      "farmer_win_rate": 0.5975
     },
     "rlcard": {
-      "games": 300,
-      "wins": 113,
-      "landlord_games": 100,
-      "landlord_wins": 23,
-      "farmer_games": 200,
-      "farmer_wins": 90,
-      "overall_win_rate": 0.37666666666666665,
-      "landlord_win_rate": 0.23,
-      "farmer_win_rate": 0.45
-    },
-    "adversarial": {
-      "games": 300,
-      "wins": 141,
-      "landlord_games": 100,
-      "landlord_wins": 37,
-      "farmer_games": 200,
-      "farmer_wins": 104,
-      "overall_win_rate": 0.47,
-      "landlord_win_rate": 0.37,
-      "farmer_win_rate": 0.52
+      "games": 6000,
+      "wins": 2608,
+      "landlord_games": 2000,
+      "landlord_wins": 805,
+      "farmer_games": 4000,
+      "farmer_wins": 1803,
+      "overall_win_rate": 0.43466666666666665,
+      "landlord_win_rate": 0.4025,
+      "farmer_win_rate": 0.45075
     }
   },
   "assignments": [
     {
       "轮换编号": "1/3",
-      "中文说明": "第1组：montecarlo，农民-地主上家=rlcard，农民-地主下家=adversarial",
+      "中文说明": "第1组：nnpolicy:role_policy_weights.json，农民-地主上家=rlcard，农民-地主下家=rlcard",
       "胜率说明": "landlord_win_rate 是地主阵营胜率，farmer_win_rate 是两个农民阵营合计胜率。",
       "ADP说明": "landlord_adp 是地主阵营平均分差，farmer_adp 是两个农民合计口径的平均分差。",
       "roles": {
-        "landlord": "montecarlo",
+        "landlord": "nnpolicy:role_policy_weights.json",
         "landlord_up": "rlcard",
-        "landlord_down": "adversarial"
+        "landlord_down": "rlcard"
       },
       "resolved_roles": {
-        "landlord": "montecarlo",
+        "landlord": "nnpolicy:role_policy_weights.json",
         "landlord_up": "rlcard",
-        "landlord_down": "adversarial"
+        "landlord_down": "rlcard"
       },
       "roles_zh": {
-        "地主": "montecarlo",
+        "地主": "nnpolicy:role_policy_weights.json",
         "农民-地主上家": "rlcard",
-        "农民-地主下家": "adversarial"
+        "农民-地主下家": "rlcard"
       },
-      "组合说明": "地主=montecarlo; 农民-地主上家=rlcard; 农民-地主下家=adversarial",
-      "games": 100,
-      "landlord_wins": 73,
-      "farmer_wins": 27,
-      "landlord_win_rate": 0.73,
-      "farmer_win_rate": 0.27,
-      "landlord_adp": 1.64,
-      "farmer_adp": -1.64,
+      "组合说明": "地主=nnpolicy:role_policy_weights.json; 农民-地主上家=rlcard; 农民-地主下家=rlcard",
+      "games": 1000,
+      "landlord_wins": 696,
+      "farmer_wins": 304,
+      "landlord_win_rate": 0.696,
+      "farmer_win_rate": 0.304,
+      "landlord_adp": 0.954,
+      "farmer_adp": -0.954,
       "player_stats": {
-        "montecarlo": {
-          "games": 100,
-          "wins": 73,
-          "landlord_games": 100,
-          "landlord_wins": 73,
+        "nnpolicy:role_policy_weights.json": {
+          "games": 1000,
+          "wins": 696,
+          "landlord_games": 1000,
+          "landlord_wins": 696,
           "farmer_games": 0,
           "farmer_wins": 0,
-          "overall_win_rate": 0.73,
-          "landlord_win_rate": 0.73,
+          "overall_win_rate": 0.696,
+          "landlord_win_rate": 0.696,
           "farmer_win_rate": null
         },
         "rlcard": {
-          "games": 100,
-          "wins": 27,
+          "games": 2000,
+          "wins": 608,
           "landlord_games": 0,
           "landlord_wins": 0,
-          "farmer_games": 100,
-          "farmer_wins": 27,
-          "overall_win_rate": 0.27,
+          "farmer_games": 2000,
+          "farmer_wins": 608,
+          "overall_win_rate": 0.304,
           "landlord_win_rate": null,
-          "farmer_win_rate": 0.27
-        },
-        "adversarial": {
-          "games": 100,
-          "wins": 27,
-          "landlord_games": 0,
-          "landlord_wins": 0,
-          "farmer_games": 100,
-          "farmer_wins": 27,
-          "overall_win_rate": 0.27,
-          "landlord_win_rate": null,
-          "farmer_win_rate": 0.27
+          "farmer_win_rate": 0.304
         }
       }
     },
 
     {
       "轮换编号": "2/3",
-      "中文说明": "第2组：rlcard，农民-地主上家=adversarial，农民-地主下家=montecarlo",
+      "中文说明": "第2组：rlcard，农民-地主上家=rlcard，农民-地主下家=nnpolicy:role_policy_weights.json",
       "胜率说明": "landlord_win_rate 是地主阵营胜率，farmer_win_rate 是两个农民阵营合计胜率。",
       "ADP说明": "landlord_adp 是地主阵营平均分差，farmer_adp 是两个农民合计口径的平均分差。",
       "roles": {
         "landlord": "rlcard",
-        "landlord_up": "adversarial",
-        "landlord_down": "montecarlo"
+        "landlord_up": "rlcard",
+        "landlord_down": "nnpolicy:role_policy_weights.json"
       },
       "resolved_roles": {
         "landlord": "rlcard",
-        "landlord_up": "adversarial",
-        "landlord_down": "montecarlo"
+        "landlord_up": "rlcard",
+        "landlord_down": "nnpolicy:role_policy_weights.json"
       },
       "roles_zh": {
         "地主": "rlcard",
-        "农民-地主上家": "adversarial",
-        "农民-地主下家": "montecarlo"
+        "农民-地主上家": "rlcard",
+        "农民-地主下家": "nnpolicy:role_policy_weights.json"
       },
-      "组合说明": "地主=rlcard; 农民-地主上家=adversarial; 农民-地主下家=montecarlo",
-      "games": 100,
-      "landlord_wins": 23,
-      "farmer_wins": 77,
-      "landlord_win_rate": 0.23,
-      "farmer_win_rate": 0.77,
-      "landlord_adp": -1.94,
-      "farmer_adp": 1.94,
+      "组合说明": "地主=rlcard; 农民-地主上家=rlcard; 农民-地主下家=nnpolicy:role_policy_weights.json",
+      "games": 1000,
+      "landlord_wins": 443,
+      "farmer_wins": 557,
+      "landlord_win_rate": 0.443,
+      "farmer_win_rate": 0.557,
+      "landlord_adp": -0.292,
+      "farmer_adp": 0.292,
       "player_stats": {
         "rlcard": {
-          "games": 100,
-          "wins": 23,
-          "landlord_games": 100,
-          "landlord_wins": 23,
-          "farmer_games": 0,
-          "farmer_wins": 0,
-          "overall_win_rate": 0.23,
-          "landlord_win_rate": 0.23,
-          "farmer_win_rate": null
+          "games": 2000,
+          "wins": 1000,
+          "landlord_games": 1000,
+          "landlord_wins": 443,
+          "farmer_games": 1000,
+          "farmer_wins": 557,
+          "overall_win_rate": 0.5,
+          "landlord_win_rate": 0.443,
+          "farmer_win_rate": 0.557
         },
-        "adversarial": {
-          "games": 100,
-          "wins": 77,
+        "nnpolicy:role_policy_weights.json": {
+          "games": 1000,
+          "wins": 557,
           "landlord_games": 0,
           "landlord_wins": 0,
-          "farmer_games": 100,
-          "farmer_wins": 77,
-          "overall_win_rate": 0.77,
+          "farmer_games": 1000,
+          "farmer_wins": 557,
+          "overall_win_rate": 0.557,
           "landlord_win_rate": null,
-          "farmer_win_rate": 0.77
-        },
-        "montecarlo": {
-          "games": 100,
-          "wins": 77,
-          "landlord_games": 0,
-          "landlord_wins": 0,
-          "farmer_games": 100,
-          "farmer_wins": 77,
-          "overall_win_rate": 0.77,
-          "landlord_win_rate": null,
-          "farmer_win_rate": 0.77
+          "farmer_win_rate": 0.557
         }
       }
     },
 
     {
       "轮换编号": "3/3",
-      "中文说明": "第3组：adversarial，农民-地主上家=montecarlo，农民-地主下家=rlcard",
+      "中文说明": "第3组：rlcard，农民-地主上家=nnpolicy:role_policy_weights.json，农民-地主下家=rlcard",
       "胜率说明": "landlord_win_rate 是地主阵营胜率，farmer_win_rate 是两个农民阵营合计胜率。",
       "ADP说明": "landlord_adp 是地主阵营平均分差，farmer_adp 是两个农民合计口径的平均分差。",
       "roles": {
-        "landlord": "adversarial",
-        "landlord_up": "montecarlo",
+        "landlord": "rlcard",
+        "landlord_up": "nnpolicy:role_policy_weights.json",
         "landlord_down": "rlcard"
       },
       "resolved_roles": {
-        "landlord": "adversarial",
-        "landlord_up": "montecarlo",
+        "landlord": "rlcard",
+        "landlord_up": "nnpolicy:role_policy_weights.json",
         "landlord_down": "rlcard"
       },
       "roles_zh": {
-        "地主": "adversarial",
-        "农民-地主上家": "montecarlo",
+        "地主": "rlcard",
+        "农民-地主上家": "nnpolicy:role_policy_weights.json",
         "农民-地主下家": "rlcard"
       },
-      "组合说明": "地主=adversarial; 农民-地主上家=montecarlo; 农民-地主下家=rlcard",
-      "games": 100,
-      "landlord_wins": 37,
-      "farmer_wins": 63,
-      "landlord_win_rate": 0.37,
-      "farmer_win_rate": 0.63,
-      "landlord_adp": -0.86,
-      "farmer_adp": 0.86,
+      "组合说明": "地主=rlcard; 农民-地主上家=nnpolicy:role_policy_weights.json; 农民-地主下家=rlcard",
+      "games": 1000,
+      "landlord_wins": 362,
+      "farmer_wins": 638,
+      "landlord_win_rate": 0.362,
+      "farmer_win_rate": 0.638,
+      "landlord_adp": -0.67,
+      "farmer_adp": 0.67,
       "player_stats": {
-        "adversarial": {
-          "games": 100,
-          "wins": 37,
-          "landlord_games": 100,
-          "landlord_wins": 37,
-          "farmer_games": 0,
-          "farmer_wins": 0,
-          "overall_win_rate": 0.37,
-          "landlord_win_rate": 0.37,
-          "farmer_win_rate": null
-        },
-        "montecarlo": {
-          "games": 100,
-          "wins": 63,
-          "landlord_games": 0,
-          "landlord_wins": 0,
-          "farmer_games": 100,
-          "farmer_wins": 63,
-          "overall_win_rate": 0.63,
-          "landlord_win_rate": null,
-          "farmer_win_rate": 0.63
-        },
         "rlcard": {
-          "games": 100,
-          "wins": 63,
+          "games": 2000,
+          "wins": 1000,
+          "landlord_games": 1000,
+          "landlord_wins": 362,
+          "farmer_games": 1000,
+          "farmer_wins": 638,
+          "overall_win_rate": 0.5,
+          "landlord_win_rate": 0.362,
+          "farmer_win_rate": 0.638
+        },
+        "nnpolicy:role_policy_weights.json": {
+          "games": 1000,
+          "wins": 638,
           "landlord_games": 0,
           "landlord_wins": 0,
-          "farmer_games": 100,
-          "farmer_wins": 63,
-          "overall_win_rate": 0.63,
+          "farmer_games": 1000,
+          "farmer_wins": 638,
+          "overall_win_rate": 0.638,
           "landlord_win_rate": null,
-          "farmer_win_rate": 0.63
+          "farmer_win_rate": 0.638
         }
       }
     }
