@@ -30,7 +30,7 @@ from douzero.rl.qlearning import (
 DEFAULT_APPROX_DOUFEATURE_PATH = "approx_qlearning_checkpoints/approx_doufeature/model.pkl"
 DEFAULT_APPROX_DOUFEATURE_DIR = "approx_qlearning_checkpoints/approx_doufeature"
 CARD_RANKS_13 = (3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 17)
-UPDATE_MODES = ("td", "mc")
+UPDATE_MODES = ("td", "mc", "mc_adv")
 X_DIMS = {"landlord": 373, "landlord_up": 484, "landlord_down": 484}
 Z_DIM = 5 * 162
 FEATURE_DIMS = {position: X_DIMS[position] + Z_DIM for position in POSITIONS}
@@ -44,6 +44,7 @@ class Transition:
     reward: float
     next_features: np.ndarray | None = None
     next_value: float | None = None
+    final_reward: float | None = None
 
 
 #TODO: 生成 DouZero 54 维牌面编码中每一维的人类可读名称。
@@ -300,6 +301,75 @@ class FeatureDiagnostics:
         self.reset()
 
 
+class ReturnBaseline:
+    #TODO: 维护每个位置的滑动终局回报均值，把 MC target 转成 advantage 降低角色偏置。
+    def __init__(self, values=None, beta=0.01):
+        self.values = {position: 0.0 for position in POSITIONS}
+        if values:
+            for position in POSITIONS:
+                self.values[position] = float(values.get(position, 0.0))
+        self.beta = float(beta)
+
+    #TODO: 用本批终局回报更新 position baseline。
+    def update(self, returns_by_position):
+        if self.beta <= 0:
+            return
+        for position, returns in returns_by_position.items():
+            if not returns:
+                continue
+            mean_return = float(sum(returns) / len(returns))
+            self.values[position] = (
+                (1.0 - self.beta) * self.values[position]
+                + self.beta * mean_return
+            )
+
+    #TODO: 返回某个位置的当前 baseline。
+    def value(self, position):
+        return self.values.get(position, 0.0)
+
+
+class ReplayBuffer:
+    #TODO: 按位置保存最近 transitions，并支持随机 mini-batch 采样。
+    def __init__(self, capacity=0, seed=0):
+        self.capacity = int(capacity or 0)
+        self.rng = random.Random(seed)
+        self.data = {
+            position: deque(maxlen=self.capacity if self.capacity > 0 else None)
+            for position in POSITIONS
+        }
+
+    #TODO: 将采样得到的 transitions 加入 buffer。
+    def extend(self, transitions):
+        if self.capacity <= 0:
+            return
+        for transition in transitions:
+            self.data[transition.position].append(transition)
+
+    #TODO: 从所有 position 的 buffer 中尽量均衡地抽取一个 mini-batch。
+    def sample(self, batch_size):
+        available = [p for p in POSITIONS if self.data[p]]
+        if not available or batch_size <= 0:
+            return []
+        per_position = max(1, batch_size // len(available))
+        batch = []
+        for position in available:
+            items = self.data[position]
+            count = min(len(items), per_position)
+            indices = self.rng.sample(range(len(items)), count)
+            batch.extend(items[index] for index in indices)
+        remaining = batch_size - len(batch)
+        if remaining > 0:
+            flat = [item for position in available for item in self.data[position]]
+            count = min(remaining, len(flat))
+            batch.extend(self.rng.sample(flat, count))
+        self.rng.shuffle(batch)
+        return batch
+
+    #TODO: 返回当前 buffer 中样本总数，便于日志记录。
+    def __len__(self):
+        return sum(len(items) for items in self.data.values())
+
+
 class _CollectAgent:
     #TODO: 构造只负责采样 trajectory 的 agent；worker 内不更新权重。
     def __init__(self, position, model, update_mode, epsilon, reward_scale,
@@ -320,7 +390,7 @@ class _CollectAgent:
         self.pending = None
         self.episode_features = []
 
-    #TODO: 当前玩家行动；TD 模式闭合上一条 transition，MC 模式只记录动作特征。
+    #TODO: 当前玩家行动；TD 模式闭合上一条 transition，MC/MC-adv 模式记录整局动作特征。
     def act(self, infoset):
         actions, features = douzero_features_for_infoset(self.position, infoset)
         if self.update_mode == "td" and self.pending is not None:
@@ -336,22 +406,36 @@ class _CollectAgent:
         shaped = 0.0
         if self.reward_shaping:
             shaped = shaped_reward_for_action(self.position, infoset, action, self.reward_scale)
-        if self.update_mode == "mc":
+        if self.update_mode in ("mc", "mc_adv"):
             self.episode_features.append((feature, shaped))
         else:
             self.pending = (feature, shaped)
         return action
 
-    #TODO: 终局时把最终回报接到 TD 最后一条 transition，或回填给 MC 全局轨迹。
+    #TODO: 终局时把最终回报接到 TD 最后一条 transition，或回填给 MC/MC-adv 全局轨迹。
     def finish_episode(self, final_reward):
-        if self.update_mode == "mc":
+        if self.update_mode in ("mc", "mc_adv"):
             for feature, shaped in self.episode_features:
-                self.transitions.append(Transition(self.position, feature, final_reward + shaped, None))
+                self.transitions.append(Transition(
+                    self.position,
+                    feature,
+                    final_reward + shaped,
+                    None,
+                    None,
+                    final_reward,
+                ))
             self.episode_features = []
             return
         if self.pending is not None:
             feature, shaped = self.pending
-            self.transitions.append(Transition(self.position, feature, final_reward + shaped, None))
+            self.transitions.append(Transition(
+                self.position,
+                feature,
+                final_reward + shaped,
+                None,
+                None,
+                final_reward,
+            ))
             self.pending = None
 
 
@@ -458,6 +542,11 @@ def training_metadata(flags, episode, epsilon, load_path, model, total_steps, di
         "clip_td": flags.clip_td,
         "num_workers": flags.num_workers,
         "worker_episodes": flags.worker_episodes,
+        "buffer_size": flags.buffer_size,
+        "learn_batch_size": flags.learn_batch_size,
+        "learn_steps": flags.learn_steps,
+        "baseline_beta": flags.baseline_beta,
+        "return_baseline": model.metadata.get("return_baseline", {}),
         "feature_schema": "douzero_x_batch_plus_flat_z_batch",
         "feature_dims": FEATURE_DIMS,
         "total_steps": total_steps,
@@ -466,13 +555,21 @@ def training_metadata(flags, episode, epsilon, load_path, model, total_steps, di
     }
 
 
+#TODO: 根据更新模式计算监督 target；MC advantage 会减去 position baseline。
+def transition_target(transition, flags, baseline):
+    target = transition.reward
+    if flags.update_mode == "td" and transition.next_value is not None:
+        target += flags.gamma * transition.next_value
+    elif flags.update_mode == "mc_adv":
+        target -= baseline.value(transition.position)
+    return target
+
+
 #TODO: 使用 CPU 逐条更新，作为无 torch 或显式 CPU fallback。
-def apply_transitions_cpu(model, transitions, flags, diagnostics):
+def apply_transitions_cpu(model, transitions, flags, diagnostics, baseline):
     abs_error = 0.0
     for transition in transitions:
-        target = transition.reward
-        if flags.update_mode == "td" and transition.next_value is not None:
-            target += flags.gamma * transition.next_value
+        target = transition_target(transition, flags, baseline)
         raw_error, _, delta_w = model.update_one(
             transition.position,
             transition.feature,
@@ -487,7 +584,7 @@ def apply_transitions_cpu(model, transitions, flags, diagnostics):
 
 
 #TODO: 使用 PyTorch 按位置批量更新线性权重，可在 CUDA 上加速大 batch 矩阵运算。
-def apply_transitions_torch(model, transitions, flags, diagnostics, device):
+def apply_transitions_torch(model, transitions, flags, diagnostics, device, baseline):
     if not transitions:
         return 0.0
     total_abs_error = 0.0
@@ -497,13 +594,10 @@ def apply_transitions_torch(model, transitions, flags, diagnostics, device):
         if not group:
             continue
         features_np = np.stack([item.feature for item in group]).astype(np.float32)
-        targets_np = np.asarray([item.reward for item in group], dtype=np.float32)
-        if flags.update_mode == "td":
-            next_values = np.asarray([
-                0.0 if item.next_value is None else item.next_value
-                for item in group
-            ], dtype=np.float32)
-            targets_np = targets_np + flags.gamma * next_values
+        targets_np = np.asarray([
+            transition_target(item, flags, baseline)
+            for item in group
+        ], dtype=np.float32)
 
         features = torch.from_numpy(features_np).to(device)
         targets = torch.from_numpy(targets_np).to(device)
@@ -540,10 +634,19 @@ def apply_transitions_torch(model, transitions, flags, diagnostics, device):
 
 
 #TODO: 根据 device 自动选择 CPU 逐条更新或 PyTorch batch 更新。
-def apply_transitions(model, transitions, flags, diagnostics, device):
+def apply_transitions(model, transitions, flags, diagnostics, device, baseline):
     if device is None:
-        return apply_transitions_cpu(model, transitions, flags, diagnostics)
-    return apply_transitions_torch(model, transitions, flags, diagnostics, device)
+        return apply_transitions_cpu(model, transitions, flags, diagnostics, baseline)
+    return apply_transitions_torch(model, transitions, flags, diagnostics, device, baseline)
+
+
+#TODO: 从 transitions 中提取终局回报，供 ReturnBaseline 更新。
+def returns_by_position(transitions):
+    grouped = {position: [] for position in POSITIONS}
+    for transition in transitions:
+        if transition.final_reward is not None:
+            grouped[transition.position].append(float(transition.final_reward))
+    return grouped
 
 
 #TODO: 把剩余 episode 切成若干 worker task。
@@ -662,6 +765,11 @@ def train(flags):
         completed = 0
         total_steps = 0
         epsilon = flags.epsilon
+    baseline = ReturnBaseline(
+        model.metadata.get("return_baseline", {}),
+        flags.baseline_beta,
+    )
+    replay_buffer = ReplayBuffer(flags.buffer_size, flags.seed)
 
     os.makedirs(checkpoint_dir(flags), exist_ok=True)
     diag_path = Path(checkpoint_dir(flags)) / "feature_diagnostics.csv"
@@ -679,9 +787,12 @@ def train(flags):
 
     print(
         "ApproxDouFeature mode={} episodes={} workers={} worker_episodes={} "
-        "device={} feature_dims={} diag={}".format(
+        "device={} buffer_size={} learn_batch={} learn_steps={} baseline={} "
+        "feature_dims={} diag={}".format(
             flags.update_mode, flags.episodes, flags.num_workers,
             flags.worker_episodes, device if device is not None else "numpy-cpu",
+            flags.buffer_size, flags.learn_batch_size, flags.learn_steps,
+            baseline.values if flags.update_mode == "mc_adv" else "off",
             FEATURE_DIMS, diag_path
         )
     )
@@ -700,10 +811,34 @@ def train(flags):
                 chunk_episodes += result["episodes"]
                 chunk_steps += result["steps"]
                 chunk_wins += result["landlord_wins"]
-            avg_error = apply_transitions(model, transitions, flags, diagnostics, device)
+            chunk_returns = (
+                returns_by_position(transitions)
+                if flags.update_mode == "mc_adv" else None
+            )
+            if flags.buffer_size > 0:
+                replay_buffer.extend(transitions)
+                learn_errors = []
+                for _ in range(max(1, flags.learn_steps)):
+                    batch = replay_buffer.sample(flags.learn_batch_size)
+                    if not batch:
+                        break
+                    learn_errors.append(
+                        apply_transitions(model, batch, flags, diagnostics, device, baseline)
+                    )
+                avg_error = (
+                    sum(learn_errors) / len(learn_errors)
+                    if learn_errors else 0.0
+                )
+            else:
+                avg_error = apply_transitions(
+                    model, transitions, flags, diagnostics, device, baseline
+                )
+            if chunk_returns is not None:
+                baseline.update(chunk_returns)
             completed += chunk_episodes
             total_steps += chunk_steps
             epsilon = max(flags.min_epsilon, epsilon * (flags.epsilon_decay ** chunk_episodes))
+            model.metadata["return_baseline"] = dict(baseline.values)
             recent_wins.append(chunk_wins / max(1, chunk_episodes))
             recent_steps.append(chunk_steps / max(1, chunk_episodes))
             recent_errors.append(avg_error)
@@ -738,9 +873,12 @@ def train(flags):
                 speed = (completed - start_completed) / elapsed
                 print(
                     "episode={} updates={} epsilon={:.4f} landlord_wp={:.3f} "
-                    "avg_steps={:.1f} avg_abs_error={:.4f} speed={:.2f}eps/s".format(
+                    "avg_steps={:.1f} avg_abs_error={:.4f} buffer={} "
+                    "baseline={} speed={:.2f}eps/s".format(
                         completed, model.num_updates, epsilon, wp, avg_steps,
-                        avg_abs_error, speed
+                        avg_abs_error, len(replay_buffer),
+                        baseline.values if flags.update_mode == "mc_adv" else "off",
+                        speed
                     )
                 )
                 diagnostics.flush(completed, model)
@@ -764,6 +902,7 @@ def train(flags):
 
     final_path = checkpoint_path(flags, completed)
     diagnostics.flush(completed, model)
+    model.metadata["return_baseline"] = dict(baseline.values)
     model.save(final_path, training_metadata(
         flags, completed, epsilon, load_path, model, total_steps, diag_path
     ))
@@ -804,5 +943,9 @@ def build_parser():
     parser.add_argument("--num_workers", default=1, type=int)
     parser.add_argument("--worker_episodes", default=8, type=int)
     parser.add_argument("--cpu_threads", default=1, type=int)
+    parser.add_argument("--buffer_size", default=0, type=int)
+    parser.add_argument("--learn_batch_size", default=4096, type=int)
+    parser.add_argument("--learn_steps", default=1, type=int)
+    parser.add_argument("--baseline_beta", default=0.01, type=float)
     parser.add_argument("--diag_topk", default=20, type=int)
     return parser

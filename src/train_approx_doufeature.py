@@ -37,6 +37,10 @@ CONFIG_OVERRIDE_FIELDS = (
     "num_workers",
     "worker_episodes",
     "cpu_threads",
+    "buffer_size",
+    "learn_batch_size",
+    "learn_steps",
+    "baseline_beta",
     "diag_topk",
 )
 

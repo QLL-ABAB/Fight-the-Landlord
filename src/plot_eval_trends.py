@@ -31,7 +31,7 @@ DEFAULT_EVAL_DATA = REPO_ROOT / "eval_data.pkl"
 DEFAULT_OUTPUT_PREFIX = "approxq_douzero_vs_rlcard_fixed_trend"
 DOUZERO_CHECKPOINT_RE = re.compile(r"landlord_weights_(\d+)\.ckpt$")
 SERIES_ARG_RE = re.compile(r"^(?P<label>[^=]+)=(?P<path>.+)$")
-SERIES_PREFIXES = {"approxq", "approx_doufeature", "approxdou", "approxdf"}
+SERIES_PREFIXES = {"approxq", "approx_qlearning", "approx_doufeature", "approxdou", "approxdf"}
 
 
 def numeric_approxq_checkpoints(directory: Path):
@@ -62,6 +62,27 @@ def limited_points(points, max_points: int):
     return points[:max_points]
 
 
+def infer_method_prefix(directory: Path):
+    #TODO: 自动判断 series 目录属于旧 ApproxQ 还是 DouZero-feature ApproxQ，减少命令出错。
+    parts = set(directory.parts)
+    if "approx_doufeature" in parts or directory.name.startswith("approx_doufeature"):
+        return "approx_doufeature"
+    if "approx_qlearning" in parts or directory.name.startswith("approxq"):
+        return "approxq"
+    for checkpoint in numeric_approxq_checkpoints(directory)[:1]:
+        try:
+            with open(checkpoint[1], "rb") as handle:
+                payload = pickle.load(handle)
+        except Exception:
+            continue
+        algorithm = payload.get("algorithm") if isinstance(payload, dict) else ""
+        if algorithm == "approx_doufeature":
+            return "approx_doufeature"
+        if algorithm in ("approxq", "approx_qlearning", "approx_qlearning"):
+            return "approxq"
+    return "approxq"
+
+
 def parse_series_args(series_args, default_label, default_path):
     if not series_args:
         return [(default_label, "approxq", Path(default_path))]
@@ -74,14 +95,17 @@ def parse_series_args(series_args, default_label, default_path):
                 "label=agent_prefix:/path".format(item)
             )
         value = match.group("path")
-        method_prefix = "approxq"
+        method_prefix = None
         for prefix in SERIES_PREFIXES:
             marker = "{}:".format(prefix)
             if value.startswith(marker):
-                method_prefix = prefix
+                method_prefix = "approx_doufeature" if prefix in ("approxdou", "approxdf") else prefix
                 value = value[len(marker):]
                 break
-        parsed.append((match.group("label"), method_prefix, Path(value)))
+        directory = Path(value)
+        if method_prefix is None:
+            method_prefix = infer_method_prefix(directory)
+        parsed.append((match.group("label"), method_prefix, directory))
     return parsed
 
 
@@ -176,7 +200,36 @@ def read_plot_data(path: Path):
     return rows
 
 
-def plot_rows(path: Path, rows, baseline_win_rate: float, test_role: str):
+def align_reused_douzero_rows(rows, douzero_root: Path, avg_steps_per_episode: float,
+                              max_points: int):
+    #TODO: 复用旧 DouZero 胜率时，用当前 frame/episode 比例重算横轴。
+    if not rows:
+        return []
+    rows = sorted(rows, key=row_key)
+    if max_points > 0:
+        rows = rows[:max_points]
+    points = limited_points(
+        douzero_landlord_checkpoints(douzero_root, avg_steps_per_episode),
+        max_points,
+    )
+    if len(points) != len(rows):
+        warnings.warn(
+            "Cannot rescale reused DouZero rows: checkpoint count {} != row count {}. "
+            "Keeping reused episodes unchanged.".format(len(points), len(rows))
+        )
+        return rows
+    aligned = []
+    for row, (episode, _) in zip(rows, points):
+        aligned.append({
+            "series": row["series"],
+            "episode": episode,
+            "win_rate": row["win_rate"],
+        })
+    return aligned
+
+
+def plot_rows(path: Path, rows, baseline_win_rate: float, test_role: str,
+              avg_steps_per_episode: float):
     import matplotlib
 
     matplotlib.use("Agg")
@@ -222,7 +275,9 @@ def plot_rows(path: Path, rows, baseline_win_rate: float, test_role: str):
     )
 
     ax.set_title("{} win-rate trend vs RLCard baseline".format(title_role))
-    ax.set_xlabel("Training episodes")
+    ax.set_xlabel(
+        "Training episodes (DouZero frames / {:.0f})".format(avg_steps_per_episode)
+    )
     ax.set_ylabel(y_label)
     ax.set_ylim(0, 1)
     ax.grid(True, linestyle=":", alpha=0.45)
@@ -246,7 +301,8 @@ def parse_args():
         default=[],
         help=(
             "Optional extra ApproxQ series in label=/path form. "
-            "Repeatable; when omitted, --approxq_dir is used as the only series."
+            "Use label=approx_doufeature:/path to force DouZero-feature checkpoints. "
+            "When omitted, --approxq_dir is used as the only series."
         ),
     )
     parser.add_argument("--douzero_root", type=Path, default=DEFAULT_DOUZERO_ROOT)
@@ -275,8 +331,11 @@ def parse_args():
     parser.add_argument(
         "--avg_steps_per_episode",
         type=float,
-        default=40.0,
-        help="DouZero step to episode conversion: episode = step / avg_steps_per_episode",
+        default=60.0,
+        help=(
+            "DouZero frame to project-episode conversion: episode = frame / "
+            "avg_steps_per_episode. Our DouZero script used STEP_MULTIPLIER=60."
+        ),
     )
     parser.add_argument(
         "--max_points",
@@ -300,7 +359,12 @@ def main():
     )
 
     reused_rows = read_plot_data(args.reuse_plot_data) if args.reuse_plot_data else []
-    reused_douzero_rows = [row for row in reused_rows if row["series"] == "douzero"]
+    reused_douzero_rows = align_reused_douzero_rows(
+        [row for row in reused_rows if row["series"] == "douzero"],
+        args.douzero_root,
+        args.avg_steps_per_episode,
+        args.max_points,
+    )
     reused_baseline_rows = [
         row for row in reused_rows if row["series"] == "rlcard_baseline"
     ]
@@ -401,7 +465,7 @@ def main():
     csv_path = args.output_dir / "{}.csv".format(args.output_prefix)
     png_path = args.output_dir / "{}.png".format(args.output_prefix)
     write_plot_data(csv_path, rows)
-    plot_rows(png_path, rows, baseline_win_rate, args.test_role)
+    plot_rows(png_path, rows, baseline_win_rate, args.test_role, args.avg_steps_per_episode)
 
     print("Saved plot data to {}".format(csv_path))
     print("Saved trend chart to {}".format(png_path))

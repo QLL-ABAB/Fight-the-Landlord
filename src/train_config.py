@@ -57,6 +57,10 @@ class ApproxDouFeatureTrainConfig(ApproxQTrainConfig):
     update_mode: str = "td"
     num_workers: int = 4
     worker_episodes: int = 8
+    buffer_size: int = 0
+    learn_batch_size: int = 4096
+    learn_steps: int = 1
+    baseline_beta: float = 0.01
     diag_topk: int = 20
 
 
@@ -134,6 +138,22 @@ APPROX_DOUFEATURE_TRAIN_CONFIGS = {
         progress_interval=5000,
         save_interval=50000,
     ),
+    "approx_doufeature_logadp_td_buffer_1m": ApproxDouFeatureTrainConfig(
+        name="approx_doufeature_logadp_td_buffer_1m",
+        update_mode="td",
+        episodes=1000000,
+        alpha=0.003,
+        gamma=1,
+        reward_shaping=False,
+        num_workers=4,
+        worker_episodes=8,
+        buffer_size=200000,
+        learn_batch_size=4096,
+        learn_steps=10,
+        log_interval=10000,
+        progress_interval=5000,
+        save_interval=50000,
+    ),
     "approx_doufeature_logadp_mc_1m": ApproxDouFeatureTrainConfig(
         name="approx_doufeature_logadp_mc_1m",
         update_mode="mc",
@@ -143,6 +163,23 @@ APPROX_DOUFEATURE_TRAIN_CONFIGS = {
         reward_shaping=False,
         num_workers=4,
         worker_episodes=8,
+        log_interval=10000,
+        progress_interval=5000,
+        save_interval=50000,
+    ),
+    "approx_doufeature_logadp_mc_adv_buffer_1m": ApproxDouFeatureTrainConfig(
+        name="approx_doufeature_logadp_mc_adv_buffer_1m",
+        update_mode="mc_adv",
+        episodes=1000000,
+        alpha=0.001,
+        gamma=1,
+        reward_shaping=False,
+        num_workers=4,
+        worker_episodes=8,
+        buffer_size=200000,
+        learn_batch_size=4096,
+        learn_steps=10,
+        baseline_beta=0.01,
         log_interval=10000,
         progress_interval=5000,
         save_interval=50000,
@@ -218,10 +255,16 @@ def config_summary(config: ApproxQTrainConfig) -> str:
     )
     if isinstance(config, ApproxDouFeatureTrainConfig):
         common += (
-            ", update_mode={}, num_workers={}, worker_episodes={}, diag_topk={}".format(
+            ", update_mode={}, num_workers={}, worker_episodes={}, "
+            "buffer_size={}, learn_batch_size={}, learn_steps={}, "
+            "baseline_beta={}, diag_topk={}".format(
                 config.update_mode,
                 config.num_workers,
                 config.worker_episodes,
+                config.buffer_size,
+                config.learn_batch_size,
+                config.learn_steps,
+                config.baseline_beta,
                 config.diag_topk,
             )
         )

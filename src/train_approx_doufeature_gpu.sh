@@ -22,6 +22,10 @@ HAS_DEVICE=0; [[ -v DEVICE ]] && HAS_DEVICE=1
 HAS_NUM_WORKERS=0; [[ -v NUM_WORKERS ]] && HAS_NUM_WORKERS=1
 HAS_WORKER_EPISODES=0; [[ -v WORKER_EPISODES ]] && HAS_WORKER_EPISODES=1
 HAS_CPU_THREADS=0; [[ -v CPU_THREADS ]] && HAS_CPU_THREADS=1
+HAS_BUFFER_SIZE=0; [[ -v BUFFER_SIZE ]] && HAS_BUFFER_SIZE=1
+HAS_LEARN_BATCH_SIZE=0; [[ -v LEARN_BATCH_SIZE ]] && HAS_LEARN_BATCH_SIZE=1
+HAS_LEARN_STEPS=0; [[ -v LEARN_STEPS ]] && HAS_LEARN_STEPS=1
+HAS_BASELINE_BETA=0; [[ -v BASELINE_BETA ]] && HAS_BASELINE_BETA=1
 HAS_LOG_INTERVAL=0; [[ -v LOG_INTERVAL ]] && HAS_LOG_INTERVAL=1
 HAS_PROGRESS_INTERVAL=0; [[ -v PROGRESS_INTERVAL ]] && HAS_PROGRESS_INTERVAL=1
 HAS_SAVE_INTERVAL=0; [[ -v SAVE_INTERVAL ]] && HAS_SAVE_INTERVAL=1
@@ -56,6 +60,10 @@ SAVE_INTERVAL="${SAVE_INTERVAL:-50000}"
 DIAG_TOPK="${DIAG_TOPK:-20}"
 MAX_STEPS="${MAX_STEPS:-1000}"
 CPU_THREADS="${CPU_THREADS:-1}"
+BUFFER_SIZE="${BUFFER_SIZE:-0}"
+LEARN_BATCH_SIZE="${LEARN_BATCH_SIZE:-4096}"
+LEARN_STEPS="${LEARN_STEPS:-1}"
+BASELINE_BETA="${BASELINE_BETA:-0.01}"
 NICE="${NICE:-0}"
 LOAD="${LOAD:-}"
 RESUME="${RESUME:-0}"
@@ -81,6 +89,7 @@ mkdir -p "${RUN_LOG_DIR}"
     echo "Alpha=${ALPHA} Gamma=${GAMMA} Epsilon=${EPSILON} Workers=${NUM_WORKERS} WorkerEpisodes=${WORKER_EPISODES} Device=${DEVICE}"
   fi
   echo "CPU thread caps: OMP=${OMP_NUM_THREADS} MKL=${MKL_NUM_THREADS} OPENBLAS=${OPENBLAS_NUM_THREADS} NUMEXPR=${NUMEXPR_NUM_THREADS} NICE=${NICE}"
+  echo "Replay: BUFFER_SIZE=${BUFFER_SIZE} LEARN_BATCH_SIZE=${LEARN_BATCH_SIZE} LEARN_STEPS=${LEARN_STEPS} BASELINE_BETA=${BASELINE_BETA}"
   echo "Diagnostics: ${SAVEDIR}/${TASK_NAME}/feature_diagnostics.csv"
   python3 - <<'PY'
 try:
@@ -111,6 +120,10 @@ PY
     (( HAS_NUM_WORKERS )) && ARGS+=(--num_workers "${NUM_WORKERS}")
     (( HAS_WORKER_EPISODES )) && ARGS+=(--worker_episodes "${WORKER_EPISODES}")
     (( HAS_CPU_THREADS )) && ARGS+=(--cpu_threads "${CPU_THREADS}")
+    (( HAS_BUFFER_SIZE )) && ARGS+=(--buffer_size "${BUFFER_SIZE}")
+    (( HAS_LEARN_BATCH_SIZE )) && ARGS+=(--learn_batch_size "${LEARN_BATCH_SIZE}")
+    (( HAS_LEARN_STEPS )) && ARGS+=(--learn_steps "${LEARN_STEPS}")
+    (( HAS_BASELINE_BETA )) && ARGS+=(--baseline_beta "${BASELINE_BETA}")
     (( HAS_LOG_INTERVAL )) && ARGS+=(--log_interval "${LOG_INTERVAL}")
     (( HAS_PROGRESS_INTERVAL )) && ARGS+=(--progress_interval "${PROGRESS_INTERVAL}")
     (( HAS_SAVE_INTERVAL )) && ARGS+=(--save_interval "${SAVE_INTERVAL}")
@@ -135,6 +148,10 @@ PY
       --num_workers "${NUM_WORKERS}"
       --worker_episodes "${WORKER_EPISODES}"
       --cpu_threads "${CPU_THREADS}"
+      --buffer_size "${BUFFER_SIZE}"
+      --learn_batch_size "${LEARN_BATCH_SIZE}"
+      --learn_steps "${LEARN_STEPS}"
+      --baseline_beta "${BASELINE_BETA}"
       --log_interval "${LOG_INTERVAL}"
       --progress_interval "${PROGRESS_INTERVAL}"
       --save_interval "${SAVE_INTERVAL}"
