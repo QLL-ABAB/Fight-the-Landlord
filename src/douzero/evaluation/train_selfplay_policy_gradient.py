@@ -24,11 +24,11 @@ import torch.optim as optim
 
 try:
     from douzero.evaluation.high_rank_montecarlo_agent import (
-        CardCombo, CardCombinations, HighRankMonteCarloAgent, card2level
+        CardCombo, CardComboType, CardCombinations, HighRankMonteCarloAgent, card2level
     )
 except Exception:
     from high_rank_montecarlo_agent import (
-        CardCombo, CardCombinations, HighRankMonteCarloAgent, card2level
+        CardCombo, CardComboType, CardCombinations, HighRankMonteCarloAgent, card2level
     )
 
 try:
@@ -68,6 +68,65 @@ def resolve_path(path, root=None):
 def ensure_dir(path):
     if path and not os.path.exists(path):
         os.makedirs(path)
+
+
+def safe_name(text):
+    text = str(text or "").strip()
+    out = []
+    for ch in text:
+        if ch.isalnum() or ch in ("-", "_", "."):
+            out.append(ch)
+        else:
+            out.append("_")
+    return "".join(out).strip("._") or "run"
+
+
+def make_run_dir(root_dir, run_name=None, seed=None):
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    if run_name:
+        base = safe_name(run_name)
+    else:
+        suffix = "_seed{}".format(seed) if seed is not None else ""
+        base = "run_{}{}".format(stamp, suffix)
+    run_dir = os.path.join(root_dir, base)
+    if not os.path.exists(run_dir):
+        os.makedirs(run_dir)
+        return run_dir
+
+    # Avoid collisions when two runs start in the same second or reuse a name.
+    for i in range(2, 1000):
+        candidate = os.path.join(root_dir, "{}_{}".format(base, i))
+        if not os.path.exists(candidate):
+            os.makedirs(candidate)
+            return candidate
+    raise RuntimeError("Could not create unique run directory under {}".format(root_dir))
+
+
+def write_json(path, obj):
+    parent = os.path.dirname(os.path.abspath(path))
+    ensure_dir(parent)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(obj, f, indent=2, sort_keys=True)
+
+
+def append_run_index(index_path, entry):
+    if os.path.exists(index_path):
+        try:
+            with open(index_path, "r", encoding="utf-8") as f:
+                obj = json.load(f)
+        except Exception:
+            obj = {}
+    else:
+        obj = {}
+    runs = obj.get("runs", [])
+    if not isinstance(runs, list):
+        runs = []
+    runs.append(entry)
+    obj = {
+        "description": "Self-play policy-gradient training run index.",
+        "runs": runs,
+    }
+    write_json(index_path, obj)
 
 
 def card_sort_key(c):
@@ -142,6 +201,9 @@ class SimpleDoudizhuSelfPlayEnv(object):
         self.pass_count = 0
         self.history = []
         self.player_history = []
+        self.non_pass_counts = [0, 0, 0]
+        self.multiplier = 1
+        self.final_multiplier = 1
         self.done = False
         self.winner = None
         return self.get_infoset()
@@ -188,9 +250,24 @@ class SimpleDoudizhuSelfPlayEnv(object):
             out = [[self.hands[player][0]]]
         return out
 
+    def finish_multiplier(self, winner):
+        multiplier = self.multiplier
+        if winner == 0:
+            # Spring: landlord wins before both farmers play any non-pass action.
+            if self.non_pass_counts[1] == 0 and self.non_pass_counts[2] == 0:
+                multiplier *= 2
+        else:
+            # Anti-spring: farmers win while landlord has played at most once.
+            if self.non_pass_counts[0] <= 1:
+                multiplier *= 2
+        return multiplier
+
     def step(self, action):
         if self.done:
-            return self.get_infoset(), 0.0, True, {"winner": self.winner}
+            return self.get_infoset(), 0.0, True, {
+                "winner": self.winner,
+                "multiplier": self.final_multiplier,
+            }
         action = sorted(list(action or []), key=card_sort_key)
 
         legal = self.legal_actions()
@@ -203,9 +280,14 @@ class SimpleDoudizhuSelfPlayEnv(object):
         self.player_history.append(player)
 
         if action:
+            combo = CardCombo(action)
+            if combo.comboType in (CardComboType.BOMB, CardComboType.ROCKET):
+                self.multiplier *= 2
+            self.non_pass_counts[player] += 1
+
             for c in action:
                 self.hands[player].remove(c)
-            self.last_valid_combo = CardCombo(action)
+            self.last_valid_combo = combo
             self.last_valid_action = list(action)
             self.last_valid_player = player
             self.pass_count = 0
@@ -213,7 +295,11 @@ class SimpleDoudizhuSelfPlayEnv(object):
             if len(self.hands[player]) == 0:
                 self.done = True
                 self.winner = player
-                return self.get_infoset(), 0.0, True, {"winner": self.winner}
+                self.final_multiplier = self.finish_multiplier(player)
+                return self.get_infoset(), 0.0, True, {
+                    "winner": self.winner,
+                    "multiplier": self.final_multiplier,
+                }
 
             self.current_player = (player + 1) % 3
         else:
@@ -227,7 +313,10 @@ class SimpleDoudizhuSelfPlayEnv(object):
             else:
                 self.current_player = (player + 1) % 3
 
-        return self.get_infoset(), 0.0, self.done, {"winner": self.winner}
+        return self.get_infoset(), 0.0, self.done, {
+            "winner": self.winner,
+            "multiplier": self.final_multiplier if self.done else self.multiplier,
+        }
 
 
 class ActionScoringNet(nn.Module):
@@ -255,7 +344,13 @@ def make_role_optimizers(models, lr):
     return {p: optim.Adam(models[p].parameters(), lr=lr) for p in ALL_POSITIONS}
 
 
-def team_reward(winner, player):
+def team_reward(winner, player, multiplier=1, score_reward=True):
+    if score_reward:
+        score = max(1, int(multiplier))
+        if winner == 0:
+            return 2.0 * score if player == 0 else -1.0 * score
+        return -2.0 * score if player == 0 else 1.0 * score
+
     if winner == 0:
         return 1.0 if player == 0 else -1.0
     return -1.0 if player == 0 else 1.0
@@ -536,7 +631,7 @@ def run_mixed_episode(env, current_models, old_pool, mc_opponent, device, temper
         if env.done:
             break
 
-    return env.winner, transitions, mode, focus_role
+    return env.winner, getattr(env, "final_multiplier", 1), transitions, mode, focus_role
 
 
 def evaluate_selfplay(models, device, games=200, seed=1234, max_steps=300):
@@ -588,10 +683,12 @@ def main():
                     help="Optional role-specific weights JSON to continue training from")
     ap.add_argument("--old-checkpoints", default="",
                     help="Semicolon-separated old NN checkpoint JSON files used as opponents")
-    ap.add_argument("--out", default="src/role_checkpoints/mixed_policy_weights.json",
-                    help="Final exported weights JSON file. Relative paths are resolved from repo root.")
+    ap.add_argument("--out", default="mixed_policy_weights.json",
+                    help="Final weights filename inside this run directory. If a path is given, only its basename is used.")
     ap.add_argument("--out-dir", default="src/role_checkpoints",
-                    help="Directory to save checkpoint weights. Relative paths are resolved from repo root.")
+                    help="Root directory for all training runs. Each run gets its own subdirectory.")
+    ap.add_argument("--run-name", default=None,
+                    help="Optional run directory name under --out-dir")
     ap.add_argument("--hidden", type=int, default=128)
     ap.add_argument("--layers", type=int, default=2)
     ap.add_argument("--lr", type=float, default=2e-4)
@@ -604,6 +701,8 @@ def main():
     ap.add_argument("--save-every", type=int, default=5000)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--max-steps", type=int, default=300)
+    ap.add_argument("--reward-mode", choices=["score", "winloss"], default="score",
+                    help="score uses landlord +/-2 and farmer +/-1 times multiplier; winloss uses old +/-1 team reward")
 
     # Mixed-opponent controls.
     ap.add_argument("--mix-self", type=float, default=0.30,
@@ -621,8 +720,7 @@ def main():
     args = ap.parse_args()
 
     root = repo_root()
-    out_path = resolve_path(args.out, root)
-    out_dir = resolve_path(args.out_dir, root)
+    runs_root = resolve_path(args.out_dir, root)
     init_path = resolve_path(args.init_weights, root) if args.init_weights else None
     old_paths = parse_checkpoint_list(args.old_checkpoints, root)
 
@@ -630,20 +728,44 @@ def main():
     torch.manual_seed(args.seed)
     rng = random.Random(args.seed + 12345)
 
-    if os.path.exists(out_dir) and os.path.isfile(out_dir):
+    if os.path.exists(runs_root) and os.path.isfile(runs_root):
         fallback = resolve_path("src/role_checkpoints", root)
-        print("Warning: '{}' is a file, using fallback directory '{}'".format(out_dir, fallback))
-        out_dir = fallback
-    ensure_dir(out_dir)
-    ensure_dir(os.path.dirname(os.path.abspath(out_path)))
+        print("Warning: '{}' is a file, using fallback directory '{}'".format(runs_root, fallback))
+        runs_root = fallback
+    ensure_dir(runs_root)
+
+    run_dir = make_run_dir(runs_root, run_name=args.run_name, seed=args.seed)
+    final_filename = os.path.basename(args.out) or "mixed_policy_weights.json"
+    out_path = os.path.join(run_dir, final_filename)
+    run_config_path = os.path.join(run_dir, "config.json")
+    runs_index_path = os.path.join(runs_root, "training_runs.json")
 
     print("REPO_ROOT", root)
-    print("checkpoint_dir", out_dir)
+    print("runs_root", runs_root)
+    print("run_dir", run_dir)
     print("final_weights", out_path)
     if init_path:
         print("init_weights", init_path)
     if old_paths:
         print("old_checkpoints", old_paths)
+
+    run_config = {
+        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "repo_root": root,
+        "run_dir": run_dir,
+        "runs_root": runs_root,
+        "final_weights": out_path,
+        "config_json": run_config_path,
+        "args": vars(args),
+        "resolved_paths": {
+            "init_weights": init_path,
+            "old_checkpoints": old_paths,
+        },
+    }
+    write_json(run_config_path, run_config)
+    append_run_index(runs_index_path, run_config)
+    print("run_config", run_config_path)
+    print("runs_index", runs_index_path)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     models = make_role_models(device, hidden_dim=args.hidden, layers=args.layers)
@@ -676,7 +798,7 @@ def main():
             focus_count[focus_role] += 1
         mode_count[mode] += 1
 
-        winner, transitions, _, _ = run_mixed_episode(
+        winner, multiplier, transitions, _, _ = run_mixed_episode(
             env, models, old_pool, mc_opponent, device, temperature,
             mode=mode, focus_role=focus_role, max_steps=args.max_steps
         )
@@ -688,7 +810,8 @@ def main():
 
         losses_by_role = {p: [] for p in ALL_POSITIONS}
         for log_prob, entropy, player, position in transitions:
-            r = team_reward(winner, player)
+            r = team_reward(winner, player, multiplier=multiplier,
+                            score_reward=(args.reward_mode == "score"))
             adv = r - baseline[player]
             baseline[player] = baseline_beta * baseline[player] + (1.0 - baseline_beta) * r
             losses_by_role[position].append(-log_prob * adv - args.entropy_coef * entropy)
@@ -735,7 +858,7 @@ def main():
                   "role_wins", role_win)
 
         if args.save_every and ep % args.save_every == 0:
-            tmp = os.path.join(out_dir, "weights.ep%d.json" % ep)
+            tmp = os.path.join(run_dir, "weights.ep%d.json" % ep)
             export_weights(models, tmp, note="mixed-opponent fine-tuning checkpoint")
             print("saved", tmp)
 
