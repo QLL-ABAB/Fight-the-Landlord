@@ -36,3 +36,6 @@ eval_data.pkl
 # Logs
 *.log
 logs/
+
+# VScode setting
+settings.json

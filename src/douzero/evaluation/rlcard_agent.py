@@ -1,10 +1,14 @@
 import random
 
-from douzero.evaluation.rlcard_data import ensure_rlcard_doudizhu_jsondata
+try:
+    from douzero.evaluation.rlcard_data import ensure_rlcard_doudizhu_jsondata
 
-ensure_rlcard_doudizhu_jsondata()
+    ensure_rlcard_doudizhu_jsondata()
 
-from rlcard.games.doudizhu.utils import CARD_TYPE
+    from rlcard.games.doudizhu.utils import CARD_TYPE
+except Exception:
+    CARD_TYPE = None
+    from douzero.evaluation.shared_greedy_baseline import GreedyBaselinePolicy
 
 EnvCard2RealCard = {
     3: "3",
@@ -65,8 +69,16 @@ class RLCardAgent(object):
     def __init__(self, position):
         self.name = "RLCard"
         self.position = position
+        self.fallback_policy = (
+            GreedyBaselinePolicy(position)
+            if CARD_TYPE is None else
+            None
+        )
 
     def act(self, infoset):
+        if self.fallback_policy is not None:
+            return self.fallback_policy.act(infoset)
+
         try:
             # Hand cards
             hand_cards = infoset.player_hand_cards

@@ -6,12 +6,22 @@ import time
 from collections import deque
 
 from douzero.env.game import GameEnv
-from douzero.rl.approx_qlearning import (
-    feature_names_for_mode,
-    features_for_actions,
-    list_dot,
-    prune_legal_actions,
-)
+try:
+    from douzero.rl.approx_qlearning import (
+        feature_names_for_mode,
+        features_for_actions,
+        list_dot,
+        prune_legal_actions,
+    )
+except ModuleNotFoundError as exc:
+    if exc.name != "douzero.rl.approx_qlearning":
+        raise
+    from douzero.rl.approx_qlearning_fasle import (
+        feature_names_for_mode,
+        features_for_actions,
+        list_dot,
+        prune_legal_actions,
+    )
 from douzero.rl.qlearning import (
     POSITIONS,
     format_duration,

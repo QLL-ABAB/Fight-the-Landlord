@@ -5,7 +5,11 @@ import pickle
 import traceback
 from pathlib import Path
 
-from tqdm import tqdm
+try:
+    from tqdm import tqdm
+except ModuleNotFoundError:
+    def tqdm(iterable, *args, **kwargs):
+        return iterable
 
 from config import make_agent, normalized_method
 from douzero.env.game import GameEnv

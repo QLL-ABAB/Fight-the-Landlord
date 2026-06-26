@@ -1,6 +1,14 @@
 import os
 
-from douzero.rl.approx_qlearning import features_for_actions, prune_legal_actions
+try:
+    from douzero.rl.approx_qlearning import features_for_actions, prune_legal_actions
+except ModuleNotFoundError as exc:
+    if exc.name != "douzero.rl.approx_qlearning":
+        raise
+    from douzero.rl.approx_qlearning_fasle import (
+        features_for_actions,
+        prune_legal_actions,
+    )
 from douzero.rl.policy_gradient import (
     DEFAULT_POLICY_PATH,
     LinearPolicyGradientModel,
