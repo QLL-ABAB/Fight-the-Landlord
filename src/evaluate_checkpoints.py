@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -84,7 +85,7 @@ def evaluate_checkpoint(weights_path, position, eval_games=100):
     return None
 
 
-def plot_trends(results, output_dir):
+def plot_trends(results, output_dir, name_suffix=""):
     """Plot win rate trends for all three positions."""
     positions = ["landlord", "landlord_up", "landlord_down"]
     labels = ["Landlord", "Landlord Up", "Landlord Down"]
@@ -104,7 +105,7 @@ def plot_trends(results, output_dir):
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, "win_rate_trend_all.png"), dpi=150)
+    plt.savefig(os.path.join(output_dir, f"win_rate_trend_all{name_suffix}.png"), dpi=150)
     plt.close()
     
     # Individual plots
@@ -118,7 +119,7 @@ def plot_trends(results, output_dir):
         plt.legend()
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, f"win_rate_trend_{position}.png"), dpi=150)
+        plt.savefig(os.path.join(output_dir, f"win_rate_trend_{position}{name_suffix}.png"), dpi=150)
         plt.close()
 
 
@@ -130,6 +131,8 @@ def main():
                         help="Number of games to evaluate per checkpoint")
     parser.add_argument("--output-dir", type=str, default="visualization",
                         help="Directory to save plots")
+    parser.add_argument("--name", type=str, default="",
+                        help="Custom name suffix for output files (prevents overwriting)")
     parser.add_argument("--skip-existing", action="store_true",
                         help="Skip evaluation if result file already exists")
     args = parser.parse_args()
@@ -159,14 +162,23 @@ def main():
             else:
                 print(f"Episode {ep}, {position}: FAILED")
     
+    # Generate name suffix to prevent overwriting
+    name_suffix = ""
+    if args.name:
+        # Use custom name if provided
+        name_suffix = f"_{args.name}"
+    else:
+        # Use timestamp as default suffix
+        name_suffix = f"_{int(time.time())}"
+    
     # Save results to JSON
-    results_file = os.path.join(args.output_dir, "checkpoint_eval_results.json")
+    results_file = os.path.join(args.output_dir, f"checkpoint_eval_results{name_suffix}.json")
     with open(results_file, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)
     print(f"Results saved to {results_file}")
     
     # Plot trends
-    plot_trends(results, args.output_dir)
+    plot_trends(results, args.output_dir, name_suffix)
     print(f"Plots saved to {args.output_dir}")
 
 

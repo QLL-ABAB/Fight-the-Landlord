@@ -16,12 +16,12 @@
   "methods": [
     "rlcard",
     "rlcard",
-    "nnpolicy:role_checkpoints\\weights.ep50000.json"
+    "nnpolicy:role_checkpoints/mixed_from50k_mcstrong\\weights.ep50000.json"
   ],
   "raw_methods": [
     "rlcard",
     "rlcard",
-    "nnpolicy:role_checkpoints\\weights.ep50000.json"
+    "nnpolicy:role_checkpoints/mixed_from50k_mcstrong\\weights.ep50000.json"
   ],
   "eval_data": "D:\\skd\\CS181\\project\\Fight-the-Landlord\\eval_data.pkl",
   "num_workers": 5,
@@ -31,76 +31,76 @@
       "games": 2000,
       "wins": 1000,
       "landlord_games": 1000,
-      "landlord_wins": 436,
+      "landlord_wins": 420,
       "farmer_games": 1000,
-      "farmer_wins": 564,
+      "farmer_wins": 580,
       "overall_win_rate": 0.5,
-      "landlord_win_rate": 0.436,
-      "farmer_win_rate": 0.564
+      "landlord_win_rate": 0.42,
+      "farmer_win_rate": 0.58
     },
-    "nnpolicy:role_checkpoints\\weights.ep50000.json": {
+    "nnpolicy:role_checkpoints/mixed_from50k_mcstrong\\weights.ep50000.json": {
       "games": 1000,
-      "wins": 564,
+      "wins": 580,
       "landlord_games": 0,
       "landlord_wins": 0,
       "farmer_games": 1000,
-      "farmer_wins": 564,
-      "overall_win_rate": 0.564,
+      "farmer_wins": 580,
+      "overall_win_rate": 0.58,
       "landlord_win_rate": null,
-      "farmer_win_rate": 0.564
+      "farmer_win_rate": 0.58
     }
   },
   "assignments": [
     {
       "轮换编号": "1/1",
-      "中文说明": "第1组：rlcard，农民-地主上家=rlcard，农民-地主下家=nnpolicy:role_checkpoints\\weights.ep50000.json",
+      "中文说明": "第1组：rlcard，农民-地主上家=rlcard，农民-地主下家=nnpolicy:role_checkpoints/mixed_from50k_mcstrong\\weights.ep50000.json",
       "胜率说明": "landlord_win_rate 是地主阵营胜率，farmer_win_rate 是两个农民阵营合计胜率。",
       "ADP说明": "landlord_adp 是地主阵营平均分差，farmer_adp 是两个农民合计口径的平均分差。",
       "roles": {
         "landlord": "rlcard",
         "landlord_up": "rlcard",
-        "landlord_down": "nnpolicy:role_checkpoints\\weights.ep50000.json"
+        "landlord_down": "nnpolicy:role_checkpoints/mixed_from50k_mcstrong\\weights.ep50000.json"
       },
       "resolved_roles": {
         "landlord": "rlcard",
         "landlord_up": "rlcard",
-        "landlord_down": "nnpolicy:role_checkpoints\\weights.ep50000.json"
+        "landlord_down": "nnpolicy:role_checkpoints/mixed_from50k_mcstrong\\weights.ep50000.json"
       },
       "roles_zh": {
         "地主": "rlcard",
         "农民-地主上家": "rlcard",
-        "农民-地主下家": "nnpolicy:role_checkpoints\\weights.ep50000.json"
+        "农民-地主下家": "nnpolicy:role_checkpoints/mixed_from50k_mcstrong\\weights.ep50000.json"
       },
-      "组合说明": "地主=rlcard; 农民-地主上家=rlcard; 农民-地主下家=nnpolicy:role_checkpoints\\weights.ep50000.json",
+      "组合说明": "地主=rlcard; 农民-地主上家=rlcard; 农民-地主下家=nnpolicy:role_checkpoints/mixed_from50k_mcstrong\\weights.ep50000.json",
       "games": 1000,
-      "landlord_wins": 436,
-      "farmer_wins": 564,
-      "landlord_win_rate": 0.436,
-      "farmer_win_rate": 0.564,
-      "landlord_adp": -0.368,
-      "farmer_adp": 0.368,
+      "landlord_wins": 420,
+      "farmer_wins": 580,
+      "landlord_win_rate": 0.42,
+      "farmer_win_rate": 0.58,
+      "landlord_adp": -0.384,
+      "farmer_adp": 0.384,
       "player_stats": {
         "rlcard": {
           "games": 2000,
           "wins": 1000,
           "landlord_games": 1000,
-          "landlord_wins": 436,
+          "landlord_wins": 420,
           "farmer_games": 1000,
-          "farmer_wins": 564,
+          "farmer_wins": 580,
           "overall_win_rate": 0.5,
-          "landlord_win_rate": 0.436,
-          "farmer_win_rate": 0.564
+          "landlord_win_rate": 0.42,
+          "farmer_win_rate": 0.58
         },
-        "nnpolicy:role_checkpoints\\weights.ep50000.json": {
+        "nnpolicy:role_checkpoints/mixed_from50k_mcstrong\\weights.ep50000.json": {
           "games": 1000,
-          "wins": 564,
+          "wins": 580,
           "landlord_games": 0,
           "landlord_wins": 0,
           "farmer_games": 1000,
-          "farmer_wins": 564,
-          "overall_win_rate": 0.564,
+          "farmer_wins": 580,
+          "overall_win_rate": 0.58,
           "landlord_win_rate": null,
-          "farmer_win_rate": 0.564
+          "farmer_win_rate": 0.58
         }
       }
     }
