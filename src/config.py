@@ -147,6 +147,12 @@ def _policy_gradient(position: str, model_path: str | None):
     return PolicyGradientAgent(position, model_path)
 
 
+def _actor_critic(position: str, model_path: str | None):
+    from douzero.evaluation.actor_critic_agent import ActorCriticAgent
+
+    return ActorCriticAgent(position, model_path)
+
+
 #TODO: 注册 DouZero 原始特征版线性 ApproxQ，支持 TD/MC 训练产物评测。
 def _approx_doufeature(position: str, model_path: str | None):
     from douzero.evaluation.approx_doufeature_agent import ApproxDouFeatureAgent
@@ -217,6 +223,12 @@ AGENT_SPECS = (
         ("pg", "reinforce"),
         _policy_gradient,
         description="Linear-feature REINFORCE policy-gradient agent",
+    ),
+    AgentSpec(
+        "actor_critic",
+        ("ac", "a2c"),
+        _actor_critic,
+        description="Linear-feature actor-critic agent",
     ),
     AgentSpec("douzero", (), _douzero, description="Original DouZero DMC agent"),
     AgentSpec("search", (), _search, needs_position=False, description="Rollout search"),
