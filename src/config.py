@@ -147,6 +147,58 @@ def _adversarial_mc(position: str, arg: str | None):
     return agent
 
 
+def _adversarial_q(position: str, arg: str | None):
+    from douzero.evaluation.adversarial_q_agent import AdversarialQSearchAgent
+
+    model_path = None
+    num_samples = None
+    search_depth = None
+    time_budget = None
+    q_leaf_mix = None
+    q_leaf_scale = None
+
+    if arg:
+        parts = [x.strip() for x in arg.split(":") if x.strip()]
+        if len(parts) >= 2 and len(parts[0]) == 1 and (
+            parts[1].startswith("\\") or parts[1].startswith("/")
+        ):
+            parts = [parts[0] + ":" + parts[1]] + parts[2:]
+        if parts:
+            model_path = parts[0]
+        if len(parts) >= 2 and parts[1].isdigit():
+            num_samples = int(parts[1])
+        if len(parts) >= 3 and parts[2].isdigit():
+            search_depth = int(parts[2])
+        if len(parts) >= 4:
+            try:
+                time_budget = float(parts[3])
+            except ValueError:
+                pass
+        if len(parts) >= 5:
+            try:
+                q_leaf_mix = float(parts[4])
+            except ValueError:
+                pass
+        if len(parts) >= 6:
+            try:
+                q_leaf_scale = float(parts[5])
+            except ValueError:
+                pass
+
+    agent = AdversarialQSearchAgent(position, model_path=model_path)
+    if num_samples is not None:
+        agent.cfg["num_samples"] = num_samples
+    if search_depth is not None:
+        agent.cfg["search_depth"] = search_depth
+    if time_budget is not None:
+        agent.cfg["time_budget_sec"] = time_budget
+    if q_leaf_mix is not None:
+        agent.cfg["q_leaf_mix"] = q_leaf_mix
+    if q_leaf_scale is not None:
+        agent.cfg["q_leaf_scale"] = q_leaf_scale
+    return agent
+
+
 def _qlearning(position: str, model_path: str | None):
     from douzero.evaluation.qlearning_agent import QLearningAgent
 
@@ -240,6 +292,12 @@ AGENT_SPECS = (
         ("advmc", "adv_mc"),
         _adversarial_mc,
         description="Adversarial search with integrated high-rank Monte Carlo leaf evaluator",
+    ),
+    AgentSpec(
+        "adversarial_q",
+        ("advq", "adv_q"),
+        _adversarial_q,
+        description="Adversarial search with attention_dou Q-network leaf evaluator",
     ),
     AgentSpec("qlearning", (), _qlearning, description="Tabular Q-learning agent"),
     AgentSpec(

@@ -93,7 +93,7 @@ class AdversarialSearchAgent(object):
 
         self.cfg = {
             # Search budget. Increase samples/depth if speed allows.
-            "num_samples": 200000,
+            "num_samples": 2000,
             "search_depth": 3,            # includes plies after root action
             "time_budget_sec": 0.20,       # soft budget per act; fallback if exceeded
             "root_topk_leading": 7,
