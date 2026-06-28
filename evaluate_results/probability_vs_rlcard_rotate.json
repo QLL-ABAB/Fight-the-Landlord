@@ -14,201 +14,201 @@
   "evaluate_name": "probability_vs_rlcard_rotate",
   "mode": "rotate",
   "methods": [
-    "nnpolicy:role_checkpoints/score_reward_50k_2/weights.ep3000.json",
     "rlcard",
-    "rlcard"
+    "random",
+    "random"
   ],
   "raw_methods": [
-    "nnpolicy:role_checkpoints/score_reward_50k_2/weights.ep3000.json",
     "rlcard",
-    "rlcard"
+    "random",
+    "random"
   ],
   "eval_data": "D:\\skd\\CS181\\project\\Fight-the-Landlord\\eval_data.pkl",
   "num_workers": 5,
   "assignment_workers": 3,
   "summary": {
-    "nnpolicy:role_checkpoints/score_reward_50k_2/weights.ep3000.json": {
-      "games": 3000,
-      "wins": 1615,
-      "landlord_games": 1000,
-      "landlord_wins": 565,
-      "farmer_games": 2000,
-      "farmer_wins": 1050,
-      "overall_win_rate": 0.5383333333333333,
-      "landlord_win_rate": 0.565,
-      "farmer_win_rate": 0.525
-    },
     "rlcard": {
+      "games": 3000,
+      "wins": 2732,
+      "landlord_games": 1000,
+      "landlord_wins": 916,
+      "farmer_games": 2000,
+      "farmer_wins": 1816,
+      "overall_win_rate": 0.9106666666666666,
+      "landlord_win_rate": 0.916,
+      "farmer_win_rate": 0.908
+    },
+    "random": {
       "games": 6000,
-      "wins": 2870,
+      "wins": 2168,
       "landlord_games": 2000,
-      "landlord_wins": 950,
+      "landlord_wins": 184,
       "farmer_games": 4000,
-      "farmer_wins": 1920,
-      "overall_win_rate": 0.47833333333333333,
-      "landlord_win_rate": 0.475,
-      "farmer_win_rate": 0.48
+      "farmer_wins": 1984,
+      "overall_win_rate": 0.36133333333333334,
+      "landlord_win_rate": 0.092,
+      "farmer_win_rate": 0.496
     }
   },
   "assignments": [
     {
       "轮换编号": "1/3",
-      "中文说明": "第1组：nnpolicy:role_checkpoints/score_reward_50k_2/weights.ep3000.json，农民-地主上家=rlcard，农民-地主下家=rlcard",
+      "中文说明": "第1组：rlcard，农民-地主上家=random，农民-地主下家=random",
       "胜率说明": "landlord_win_rate 是地主阵营胜率，farmer_win_rate 是两个农民阵营合计胜率。",
       "ADP说明": "landlord_adp 是地主阵营平均分差，farmer_adp 是两个农民合计口径的平均分差。",
       "roles": {
-        "landlord": "nnpolicy:role_checkpoints/score_reward_50k_2/weights.ep3000.json",
-        "landlord_up": "rlcard",
-        "landlord_down": "rlcard"
+        "landlord": "rlcard",
+        "landlord_up": "random",
+        "landlord_down": "random"
       },
       "resolved_roles": {
-        "landlord": "nnpolicy:role_checkpoints/score_reward_50k_2/weights.ep3000.json",
-        "landlord_up": "rlcard",
-        "landlord_down": "rlcard"
+        "landlord": "rlcard",
+        "landlord_up": "random",
+        "landlord_down": "random"
       },
       "roles_zh": {
-        "地主": "nnpolicy:role_checkpoints/score_reward_50k_2/weights.ep3000.json",
-        "农民-地主上家": "rlcard",
-        "农民-地主下家": "rlcard"
+        "地主": "rlcard",
+        "农民-地主上家": "random",
+        "农民-地主下家": "random"
       },
-      "组合说明": "地主=nnpolicy:role_checkpoints/score_reward_50k_2/weights.ep3000.json; 农民-地主上家=rlcard; 农民-地主下家=rlcard",
+      "组合说明": "地主=rlcard; 农民-地主上家=random; 农民-地主下家=random",
       "games": 1000,
-      "landlord_wins": 565,
-      "farmer_wins": 435,
-      "landlord_win_rate": 0.565,
-      "farmer_win_rate": 0.435,
-      "landlord_adp": 0.35,
-      "farmer_adp": -0.35,
+      "landlord_wins": 916,
+      "farmer_wins": 84,
+      "landlord_win_rate": 0.916,
+      "farmer_win_rate": 0.084,
+      "landlord_adp": 2.496,
+      "farmer_adp": -2.496,
       "player_stats": {
-        "nnpolicy:role_checkpoints/score_reward_50k_2/weights.ep3000.json": {
+        "rlcard": {
           "games": 1000,
-          "wins": 565,
+          "wins": 916,
           "landlord_games": 1000,
-          "landlord_wins": 565,
+          "landlord_wins": 916,
           "farmer_games": 0,
           "farmer_wins": 0,
-          "overall_win_rate": 0.565,
-          "landlord_win_rate": 0.565,
+          "overall_win_rate": 0.916,
+          "landlord_win_rate": 0.916,
           "farmer_win_rate": null
         },
-        "rlcard": {
+        "random": {
           "games": 2000,
-          "wins": 870,
+          "wins": 168,
           "landlord_games": 0,
           "landlord_wins": 0,
           "farmer_games": 2000,
-          "farmer_wins": 870,
-          "overall_win_rate": 0.435,
+          "farmer_wins": 168,
+          "overall_win_rate": 0.084,
           "landlord_win_rate": null,
-          "farmer_win_rate": 0.435
+          "farmer_win_rate": 0.084
         }
       }
     },
 
     {
       "轮换编号": "2/3",
-      "中文说明": "第2组：rlcard，农民-地主上家=rlcard，农民-地主下家=nnpolicy:role_checkpoints/score_reward_50k_2/weights.ep3000.json",
+      "中文说明": "第2组：random，农民-地主上家=random，农民-地主下家=rlcard",
       "胜率说明": "landlord_win_rate 是地主阵营胜率，farmer_win_rate 是两个农民阵营合计胜率。",
       "ADP说明": "landlord_adp 是地主阵营平均分差，farmer_adp 是两个农民合计口径的平均分差。",
       "roles": {
-        "landlord": "rlcard",
-        "landlord_up": "rlcard",
-        "landlord_down": "nnpolicy:role_checkpoints/score_reward_50k_2/weights.ep3000.json"
+        "landlord": "random",
+        "landlord_up": "random",
+        "landlord_down": "rlcard"
       },
       "resolved_roles": {
-        "landlord": "rlcard",
-        "landlord_up": "rlcard",
-        "landlord_down": "nnpolicy:role_checkpoints/score_reward_50k_2/weights.ep3000.json"
+        "landlord": "random",
+        "landlord_up": "random",
+        "landlord_down": "rlcard"
       },
       "roles_zh": {
-        "地主": "rlcard",
-        "农民-地主上家": "rlcard",
-        "农民-地主下家": "nnpolicy:role_checkpoints/score_reward_50k_2/weights.ep3000.json"
+        "地主": "random",
+        "农民-地主上家": "random",
+        "农民-地主下家": "rlcard"
       },
-      "组合说明": "地主=rlcard; 农民-地主上家=rlcard; 农民-地主下家=nnpolicy:role_checkpoints/score_reward_50k_2/weights.ep3000.json",
+      "组合说明": "地主=random; 农民-地主上家=random; 农民-地主下家=rlcard",
       "games": 1000,
-      "landlord_wins": 530,
-      "farmer_wins": 470,
-      "landlord_win_rate": 0.53,
-      "farmer_win_rate": 0.47,
-      "landlord_adp": 0.21,
-      "farmer_adp": -0.21,
+      "landlord_wins": 97,
+      "farmer_wins": 903,
+      "landlord_win_rate": 0.097,
+      "farmer_win_rate": 0.903,
+      "landlord_adp": -2.164,
+      "farmer_adp": 2.164,
       "player_stats": {
-        "rlcard": {
+        "random": {
           "games": 2000,
           "wins": 1000,
           "landlord_games": 1000,
-          "landlord_wins": 530,
+          "landlord_wins": 97,
           "farmer_games": 1000,
-          "farmer_wins": 470,
+          "farmer_wins": 903,
           "overall_win_rate": 0.5,
-          "landlord_win_rate": 0.53,
-          "farmer_win_rate": 0.47
+          "landlord_win_rate": 0.097,
+          "farmer_win_rate": 0.903
         },
-        "nnpolicy:role_checkpoints/score_reward_50k_2/weights.ep3000.json": {
+        "rlcard": {
           "games": 1000,
-          "wins": 470,
+          "wins": 903,
           "landlord_games": 0,
           "landlord_wins": 0,
           "farmer_games": 1000,
-          "farmer_wins": 470,
-          "overall_win_rate": 0.47,
+          "farmer_wins": 903,
+          "overall_win_rate": 0.903,
           "landlord_win_rate": null,
-          "farmer_win_rate": 0.47
+          "farmer_win_rate": 0.903
         }
       }
     },
 
     {
       "轮换编号": "3/3",
-      "中文说明": "第3组：rlcard，农民-地主上家=nnpolicy:role_checkpoints/score_reward_50k_2/weights.ep3000.json，农民-地主下家=rlcard",
+      "中文说明": "第3组：random，农民-地主上家=rlcard，农民-地主下家=random",
       "胜率说明": "landlord_win_rate 是地主阵营胜率，farmer_win_rate 是两个农民阵营合计胜率。",
       "ADP说明": "landlord_adp 是地主阵营平均分差，farmer_adp 是两个农民合计口径的平均分差。",
       "roles": {
-        "landlord": "rlcard",
-        "landlord_up": "nnpolicy:role_checkpoints/score_reward_50k_2/weights.ep3000.json",
-        "landlord_down": "rlcard"
+        "landlord": "random",
+        "landlord_up": "rlcard",
+        "landlord_down": "random"
       },
       "resolved_roles": {
-        "landlord": "rlcard",
-        "landlord_up": "nnpolicy:role_checkpoints/score_reward_50k_2/weights.ep3000.json",
-        "landlord_down": "rlcard"
+        "landlord": "random",
+        "landlord_up": "rlcard",
+        "landlord_down": "random"
       },
       "roles_zh": {
-        "地主": "rlcard",
-        "农民-地主上家": "nnpolicy:role_checkpoints/score_reward_50k_2/weights.ep3000.json",
-        "农民-地主下家": "rlcard"
+        "地主": "random",
+        "农民-地主上家": "rlcard",
+        "农民-地主下家": "random"
       },
-      "组合说明": "地主=rlcard; 农民-地主上家=nnpolicy:role_checkpoints/score_reward_50k_2/weights.ep3000.json; 农民-地主下家=rlcard",
+      "组合说明": "地主=random; 农民-地主上家=rlcard; 农民-地主下家=random",
       "games": 1000,
-      "landlord_wins": 420,
-      "farmer_wins": 580,
-      "landlord_win_rate": 0.42,
-      "farmer_win_rate": 0.58,
-      "landlord_adp": -0.386,
-      "farmer_adp": 0.386,
+      "landlord_wins": 87,
+      "farmer_wins": 913,
+      "landlord_win_rate": 0.087,
+      "farmer_win_rate": 0.913,
+      "landlord_adp": -2.348,
+      "farmer_adp": 2.348,
       "player_stats": {
-        "rlcard": {
+        "random": {
           "games": 2000,
           "wins": 1000,
           "landlord_games": 1000,
-          "landlord_wins": 420,
+          "landlord_wins": 87,
           "farmer_games": 1000,
-          "farmer_wins": 580,
+          "farmer_wins": 913,
           "overall_win_rate": 0.5,
-          "landlord_win_rate": 0.42,
-          "farmer_win_rate": 0.58
+          "landlord_win_rate": 0.087,
+          "farmer_win_rate": 0.913
         },
-        "nnpolicy:role_checkpoints/score_reward_50k_2/weights.ep3000.json": {
+        "rlcard": {
           "games": 1000,
-          "wins": 580,
+          "wins": 913,
           "landlord_games": 0,
           "landlord_wins": 0,
           "farmer_games": 1000,
-          "farmer_wins": 580,
-          "overall_win_rate": 0.58,
+          "farmer_wins": 913,
+          "overall_win_rate": 0.913,
           "landlord_win_rate": null,
-          "farmer_win_rate": 0.58
+          "farmer_win_rate": 0.913
         }
       }
     }

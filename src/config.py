@@ -129,6 +129,24 @@ def _adversarial(position: str, arg: str | None):
     return agent
 
 
+def _adversarial_mc(position: str, arg: str | None):
+    from douzero.evaluation.adversarial_mc_agent import AdversarialSearchAgent
+
+    agent = AdversarialSearchAgent(position)
+    if arg:
+        parts = [x.strip() for x in arg.split(":") if x.strip()]
+        if len(parts) >= 1 and parts[0].isdigit():
+            agent.cfg["num_samples"] = int(parts[0])
+        if len(parts) >= 2 and parts[1].isdigit():
+            agent.cfg["search_depth"] = int(parts[1])
+        if len(parts) >= 3:
+            try:
+                agent.cfg["time_budget_sec"] = float(parts[2])
+            except ValueError:
+                pass
+    return agent
+
+
 def _qlearning(position: str, model_path: str | None):
     from douzero.evaluation.qlearning_agent import QLearningAgent
 
@@ -216,6 +234,12 @@ AGENT_SPECS = (
         ("adv",),
         _adversarial,
         description="Bayesian sampled adversarial-search agent",
+    ),
+    AgentSpec(
+        "adversarial_mc",
+        ("advmc", "adv_mc"),
+        _adversarial_mc,
+        description="Adversarial search with integrated high-rank Monte Carlo leaf evaluator",
     ),
     AgentSpec("qlearning", (), _qlearning, description="Tabular Q-learning agent"),
     AgentSpec(

@@ -738,6 +738,7 @@ def main():
     final_filename = os.path.basename(args.out) or "mixed_policy_weights.json"
     out_path = os.path.join(run_dir, final_filename)
     run_config_path = os.path.join(run_dir, "config.json")
+    checkpoints_log_path = os.path.join(run_dir, "checkpoints.json")
     runs_index_path = os.path.join(runs_root, "training_runs.json")
 
     print("REPO_ROOT", root)
@@ -756,6 +757,7 @@ def main():
         "runs_root": runs_root,
         "final_weights": out_path,
         "config_json": run_config_path,
+        "checkpoints_json": checkpoints_log_path,
         "args": vars(args),
         "resolved_paths": {
             "init_weights": init_path,
@@ -785,6 +787,15 @@ def main():
     baseline_beta = 0.98
     temperature = args.temperature
     t0 = time.time()
+    last_checkpoint_time = t0
+    last_checkpoint_episode = 0
+    checkpoint_records = []
+    write_json(checkpoints_log_path, {
+        "description": "Checkpoint wall-clock timing for this training run.",
+        "run_dir": run_dir,
+        "created_at": run_config["created_at"],
+        "records": checkpoint_records,
+    })
     recent_finished = 0
     recent_landlord_wins = 0
     mode_count = {"self": 0, "mc": 0, "old": 0}
@@ -860,10 +871,63 @@ def main():
         if args.save_every and ep % args.save_every == 0:
             tmp = os.path.join(run_dir, "weights.ep%d.json" % ep)
             export_weights(models, tmp, note="mixed-opponent fine-tuning checkpoint")
-            print("saved", tmp)
+            now = time.time()
+            elapsed = now - t0
+            since_prev = now - last_checkpoint_time
+            episodes_since_prev = ep - last_checkpoint_episode
+            record = {
+                "kind": "checkpoint",
+                "episode": ep,
+                "path": tmp,
+                "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "elapsed_sec": round(elapsed, 3),
+                "elapsed_since_previous_sec": round(since_prev, 3),
+                "episodes_since_previous": episodes_since_prev,
+                "sec_per_episode_total": round(elapsed / max(1, ep), 6),
+                "sec_per_episode_since_previous": round(since_prev / max(1, episodes_since_prev), 6),
+                "temperature": float(temperature),
+                "baseline": [float(x) for x in baseline],
+            }
+            checkpoint_records.append(record)
+            write_json(checkpoints_log_path, {
+                "description": "Checkpoint wall-clock timing for this training run.",
+                "run_dir": run_dir,
+                "created_at": run_config["created_at"],
+                "records": checkpoint_records,
+            })
+            last_checkpoint_time = now
+            last_checkpoint_episode = ep
+            print("saved", tmp,
+                  "elapsed", round(elapsed, 1),
+                  "since_prev", round(since_prev, 1))
 
     export_weights(models, out_path, note="mixed-opponent fine-tuned final weights")
-    print("saved", out_path)
+    now = time.time()
+    elapsed = now - t0
+    since_prev = now - last_checkpoint_time
+    episodes_since_prev = args.episodes - last_checkpoint_episode
+    checkpoint_records.append({
+        "kind": "final",
+        "episode": args.episodes,
+        "path": out_path,
+        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "elapsed_sec": round(elapsed, 3),
+        "elapsed_since_previous_sec": round(since_prev, 3),
+        "episodes_since_previous": episodes_since_prev,
+        "sec_per_episode_total": round(elapsed / max(1, args.episodes), 6),
+        "sec_per_episode_since_previous": round(since_prev / max(1, episodes_since_prev), 6),
+        "temperature": float(temperature),
+        "baseline": [float(x) for x in baseline],
+    })
+    write_json(checkpoints_log_path, {
+        "description": "Checkpoint wall-clock timing for this training run.",
+        "run_dir": run_dir,
+        "created_at": run_config["created_at"],
+        "records": checkpoint_records,
+    })
+    print("saved", out_path,
+          "elapsed", round(elapsed, 1),
+          "checkpoints_log", checkpoints_log_path)
 
 
 if __name__ == "__main__":

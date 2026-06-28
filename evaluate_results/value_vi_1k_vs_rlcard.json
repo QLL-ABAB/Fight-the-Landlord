@@ -1,0 +1,216 @@
+{
+  "说明": {
+    "mode": "rotate 表示三个 method 轮流担任地主；fixed 表示座位固定。",
+    "roles": "landlord=地主，landlord_up=农民-地主上家，landlord_down=农民-地主下家。",
+    "assignments": "每一项是一组座位组合，文件中用空行分隔三组 rotate 结果。",
+    "landlord_win_rate": "该组中地主阵营胜率。",
+    "farmer_win_rate": "该组中两个农民阵营合计胜率。",
+    "landlord_adp": "该组中地主阵营平均分差。",
+    "farmer_adp": "该组中农民阵营平均分差，已按两个农民合计口径输出。",
+    "summary": "按 method 汇总整体胜率、担任地主胜率、担任农民胜率。",
+    "assignment_workers": "并行评测多少组座位组合；rotate 最多 3 组。",
+    "num_workers": "每组座位组合内部并行评测多少份牌局。"
+  },
+  "evaluate_name": "value_vi_1k_vs_rlcard",
+  "mode": "rotate",
+  "methods": [
+    "value:value_iteration_tables/vi_100",
+    "rlcard",
+    "rlcard"
+  ],
+  "raw_methods": [
+    "value:value_iteration_tables/vi_100",
+    "rlcard",
+    "rlcard"
+  ],
+  "eval_data": "D:\\skd\\CS181\\project\\Fight-the-Landlord\\eval_data.pkl",
+  "num_workers": 1,
+  "assignment_workers": 3,
+  "summary": {
+    "value:value_iteration_tables/vi_100": {
+      "games": 3000,
+      "wins": 1151,
+      "landlord_games": 1000,
+      "landlord_wins": 292,
+      "farmer_games": 2000,
+      "farmer_wins": 859,
+      "overall_win_rate": 0.38366666666666666,
+      "landlord_win_rate": 0.292,
+      "farmer_win_rate": 0.4295
+    },
+    "rlcard": {
+      "games": 6000,
+      "wins": 3416,
+      "landlord_games": 2000,
+      "landlord_wins": 1141,
+      "farmer_games": 4000,
+      "farmer_wins": 2275,
+      "overall_win_rate": 0.5693333333333334,
+      "landlord_win_rate": 0.5705,
+      "farmer_win_rate": 0.56875
+    }
+  },
+  "assignments": [
+    {
+      "轮换编号": "1/3",
+      "中文说明": "第1组：value:value_iteration_tables/vi_100，农民-地主上家=rlcard，农民-地主下家=rlcard",
+      "胜率说明": "landlord_win_rate 是地主阵营胜率，farmer_win_rate 是两个农民阵营合计胜率。",
+      "ADP说明": "landlord_adp 是地主阵营平均分差，farmer_adp 是两个农民合计口径的平均分差。",
+      "roles": {
+        "landlord": "value:value_iteration_tables/vi_100",
+        "landlord_up": "rlcard",
+        "landlord_down": "rlcard"
+      },
+      "resolved_roles": {
+        "landlord": "value:value_iteration_tables/vi_100",
+        "landlord_up": "rlcard",
+        "landlord_down": "rlcard"
+      },
+      "roles_zh": {
+        "地主": "value:value_iteration_tables/vi_100",
+        "农民-地主上家": "rlcard",
+        "农民-地主下家": "rlcard"
+      },
+      "组合说明": "地主=value:value_iteration_tables/vi_100; 农民-地主上家=rlcard; 农民-地主下家=rlcard",
+      "games": 1000,
+      "landlord_wins": 292,
+      "farmer_wins": 708,
+      "landlord_win_rate": 0.292,
+      "farmer_win_rate": 0.708,
+      "landlord_adp": -1.216,
+      "farmer_adp": 1.216,
+      "player_stats": {
+        "value:value_iteration_tables/vi_100": {
+          "games": 1000,
+          "wins": 292,
+          "landlord_games": 1000,
+          "landlord_wins": 292,
+          "farmer_games": 0,
+          "farmer_wins": 0,
+          "overall_win_rate": 0.292,
+          "landlord_win_rate": 0.292,
+          "farmer_win_rate": null
+        },
+        "rlcard": {
+          "games": 2000,
+          "wins": 1416,
+          "landlord_games": 0,
+          "landlord_wins": 0,
+          "farmer_games": 2000,
+          "farmer_wins": 1416,
+          "overall_win_rate": 0.708,
+          "landlord_win_rate": null,
+          "farmer_win_rate": 0.708
+        }
+      }
+    },
+
+    {
+      "轮换编号": "2/3",
+      "中文说明": "第2组：rlcard，农民-地主上家=rlcard，农民-地主下家=value:value_iteration_tables/vi_100",
+      "胜率说明": "landlord_win_rate 是地主阵营胜率，farmer_win_rate 是两个农民阵营合计胜率。",
+      "ADP说明": "landlord_adp 是地主阵营平均分差，farmer_adp 是两个农民合计口径的平均分差。",
+      "roles": {
+        "landlord": "rlcard",
+        "landlord_up": "rlcard",
+        "landlord_down": "value:value_iteration_tables/vi_100"
+      },
+      "resolved_roles": {
+        "landlord": "rlcard",
+        "landlord_up": "rlcard",
+        "landlord_down": "value:value_iteration_tables/vi_100"
+      },
+      "roles_zh": {
+        "地主": "rlcard",
+        "农民-地主上家": "rlcard",
+        "农民-地主下家": "value:value_iteration_tables/vi_100"
+      },
+      "组合说明": "地主=rlcard; 农民-地主上家=rlcard; 农民-地主下家=value:value_iteration_tables/vi_100",
+      "games": 1000,
+      "landlord_wins": 645,
+      "farmer_wins": 355,
+      "landlord_win_rate": 0.645,
+      "farmer_win_rate": 0.355,
+      "landlord_adp": 0.836,
+      "farmer_adp": -0.836,
+      "player_stats": {
+        "rlcard": {
+          "games": 2000,
+          "wins": 1000,
+          "landlord_games": 1000,
+          "landlord_wins": 645,
+          "farmer_games": 1000,
+          "farmer_wins": 355,
+          "overall_win_rate": 0.5,
+          "landlord_win_rate": 0.645,
+          "farmer_win_rate": 0.355
+        },
+        "value:value_iteration_tables/vi_100": {
+          "games": 1000,
+          "wins": 355,
+          "landlord_games": 0,
+          "landlord_wins": 0,
+          "farmer_games": 1000,
+          "farmer_wins": 355,
+          "overall_win_rate": 0.355,
+          "landlord_win_rate": null,
+          "farmer_win_rate": 0.355
+        }
+      }
+    },
+
+    {
+      "轮换编号": "3/3",
+      "中文说明": "第3组：rlcard，农民-地主上家=value:value_iteration_tables/vi_100，农民-地主下家=rlcard",
+      "胜率说明": "landlord_win_rate 是地主阵营胜率，farmer_win_rate 是两个农民阵营合计胜率。",
+      "ADP说明": "landlord_adp 是地主阵营平均分差，farmer_adp 是两个农民合计口径的平均分差。",
+      "roles": {
+        "landlord": "rlcard",
+        "landlord_up": "value:value_iteration_tables/vi_100",
+        "landlord_down": "rlcard"
+      },
+      "resolved_roles": {
+        "landlord": "rlcard",
+        "landlord_up": "value:value_iteration_tables/vi_100",
+        "landlord_down": "rlcard"
+      },
+      "roles_zh": {
+        "地主": "rlcard",
+        "农民-地主上家": "value:value_iteration_tables/vi_100",
+        "农民-地主下家": "rlcard"
+      },
+      "组合说明": "地主=rlcard; 农民-地主上家=value:value_iteration_tables/vi_100; 农民-地主下家=rlcard",
+      "games": 1000,
+      "landlord_wins": 496,
+      "farmer_wins": 504,
+      "landlord_win_rate": 0.496,
+      "farmer_win_rate": 0.504,
+      "landlord_adp": -0.128,
+      "farmer_adp": 0.128,
+      "player_stats": {
+        "rlcard": {
+          "games": 2000,
+          "wins": 1000,
+          "landlord_games": 1000,
+          "landlord_wins": 496,
+          "farmer_games": 1000,
+          "farmer_wins": 504,
+          "overall_win_rate": 0.5,
+          "landlord_win_rate": 0.496,
+          "farmer_win_rate": 0.504
+        },
+        "value:value_iteration_tables/vi_100": {
+          "games": 1000,
+          "wins": 504,
+          "landlord_games": 0,
+          "landlord_wins": 0,
+          "farmer_games": 1000,
+          "farmer_wins": 504,
+          "overall_win_rate": 0.504,
+          "landlord_win_rate": null,
+          "farmer_win_rate": 0.504
+        }
+      }
+    }
+  ]
+}

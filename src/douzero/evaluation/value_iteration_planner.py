@@ -13,6 +13,9 @@
 #     - terminal reward when the hand becomes empty.
 # ------------------------------------------------------------
 
+import json
+import os
+import time
 from collections import Counter
 from itertools import combinations
 
@@ -36,6 +39,8 @@ class ValueIterationPlanner(object):
         max_states=5000,
         max_actions_per_state=120,
         max_wing_combinations=16,
+        save_dir=None,
+        auto_save=False,
     ):
         self.gamma = float(gamma)
         self.step_reward = float(step_reward)
@@ -46,8 +51,12 @@ class ValueIterationPlanner(object):
         self.max_states = int(max_states)
         self.max_actions_per_state = int(max_actions_per_state)
         self.max_wing_combinations = int(max_wing_combinations)
+        self.save_dir = save_dir
+        self.auto_save = bool(auto_save)
 
         self.root_hand = None
+        self.global_table_loaded = False
+        self.allow_online_fallback = True
         self.values = {"": 0.0}
         self.policy = {}
         self.action_cache = {}
@@ -62,24 +71,35 @@ class ValueIterationPlanner(object):
     def plan(self, root_hand):
         """Enumerate reachable states from root_hand and run value iteration."""
         root_hand = self.sort_hand(root_hand)
+        if self.global_table_loaded and root_hand in self.values:
+            return
+        if self.global_table_loaded:
+            if self.allow_online_fallback:
+                states = self.enumerate_states(root_hand)
+                self.run_value_iteration(states)
+            return
         if self.root_hand is not None and self.is_subhand(root_hand, self.root_hand):
             return
 
         self.root_hand = root_hand
+        self.global_table_loaded = False
         self.values = {"": 0.0}
         self.policy = {}
         self.action_cache = {}
 
         states = self.enumerate_states(root_hand)
         self.run_value_iteration(states)
+        if self.auto_save and self.save_dir:
+            self.save_plan(self.save_dir)
 
-    def enumerate_states(self, root_hand):
+    def enumerate_states(self, root_hand, max_states=None):
         root_hand = self.sort_hand(root_hand)
         states = set(["", root_hand])
         stack = [root_hand]
         truncated = False
+        limit = int(max_states or self.max_states)
 
-        while stack and len(states) < self.max_states:
+        while stack and len(states) < limit:
             hand = stack.pop()
             for action in self.actions(hand):
                 next_hand = self.next_hand(hand, action)
@@ -87,7 +107,7 @@ class ValueIterationPlanner(object):
                     states.add(next_hand)
                     if next_hand:
                         stack.append(next_hand)
-                if len(states) >= self.max_states:
+                if len(states) >= limit:
                     truncated = True
                     break
 
@@ -103,6 +123,8 @@ class ValueIterationPlanner(object):
         ordered = sorted(states, key=lambda s: len(s))
         last_delta = 0.0
 
+        progress_every = int(getattr(self, "progress_every", 0) or 0)
+        t0 = time.time()
         for iteration in range(1, self.max_iterations + 1):
             delta = 0.0
             new_values = {"": 0.0}
@@ -130,6 +152,14 @@ class ValueIterationPlanner(object):
             self.values.update(new_values)
             self.policy.update(new_policy)
             last_delta = delta
+            if progress_every and (iteration == 1 or iteration % progress_every == 0 or delta < self.theta):
+                elapsed = time.time() - t0
+                print(
+                    "vi_iter {}/{} delta {:.6g} states {} elapsed {:.1f}s".format(
+                        iteration, self.max_iterations, delta, len(states), elapsed
+                    ),
+                    flush=True,
+                )
             if delta < self.theta:
                 break
 
@@ -140,18 +170,21 @@ class ValueIterationPlanner(object):
 
     def value(self, hand):
         hand = self.sort_hand(hand)
-        self.plan(hand)
+        if not (self.global_table_loaded and not self.allow_online_fallback):
+            self.plan(hand)
         return self.values.get(hand, 0.0)
 
     def q_value(self, hand, action):
         hand = self.sort_hand(hand)
         action = self.sort_hand(action)
-        self.plan(hand)
+        if not (self.global_table_loaded and not self.allow_online_fallback):
+            self.plan(hand)
         return self.q_value_from_cache(hand, action)
 
     def pass_q_value(self, hand):
         hand = self.sort_hand(hand)
-        self.plan(hand)
+        if not (self.global_table_loaded and not self.allow_online_fallback):
+            self.plan(hand)
         return self.pass_reward + self.gamma * self.values.get(hand, 0.0)
 
     def q_value_from_cache(self, hand, action):
@@ -311,3 +344,103 @@ class ValueIterationPlanner(object):
         counts = Counter(action)
         max_count = max(counts.values())
         return max(INDEX[c] for c, n in counts.items() if n == max_count)
+
+    def save_plan(self, out_dir, filename=None):
+        """Save the current root hand values/policy to a JSON file."""
+        if not self.root_hand:
+            return None
+        if not os.path.exists(out_dir):
+            os.makedirs(out_dir)
+        filename = filename or "plan_{}.json".format(self.safe_filename(self.root_hand))
+        path = os.path.join(out_dir, filename)
+        obj = {
+            "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "root_hand": self.root_hand,
+            "params": {
+                "gamma": self.gamma,
+                "step_reward": self.step_reward,
+                "terminal_reward": self.terminal_reward,
+                "pass_reward": self.pass_reward,
+                "theta": self.theta,
+                "max_iterations": self.max_iterations,
+                "max_states": self.max_states,
+                "max_actions_per_state": self.max_actions_per_state,
+                "max_wing_combinations": self.max_wing_combinations,
+            },
+            "stats": dict(self.stats),
+            "values": dict(self.values),
+            "policy": dict(self.policy),
+        }
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(obj, f, indent=2, sort_keys=True)
+        return path
+
+    def load_plan(self, path):
+        """Load a previously saved reduced-MDP plan."""
+        with open(path, "r", encoding="utf-8") as f:
+            obj = json.load(f)
+        self.root_hand = obj.get("root_hand")
+        self.global_table_loaded = obj.get("table_type") == "global"
+        self.values = dict(obj.get("values", {"": 0.0}))
+        self.policy = dict(obj.get("policy", {}))
+        self.stats.update(obj.get("stats", {}))
+        self.action_cache = {}
+        return obj
+
+    def save_table(self, out_dir):
+        """Save a global value table into a directory."""
+        if not os.path.exists(out_dir):
+            os.makedirs(out_dir)
+
+        config = {
+            "gamma": self.gamma,
+            "step_reward": self.step_reward,
+            "terminal_reward": self.terminal_reward,
+            "pass_reward": self.pass_reward,
+            "theta": self.theta,
+            "max_iterations": self.max_iterations,
+            "max_states": self.max_states,
+            "max_actions_per_state": self.max_actions_per_state,
+            "max_wing_combinations": self.max_wing_combinations,
+        }
+        metadata = {
+            "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "table_type": "global",
+            "stats": dict(self.stats),
+            "num_values": len(self.values),
+            "num_policy_states": len(self.policy),
+        }
+
+        self._write_json(os.path.join(out_dir, "config.json"), config)
+        self._write_json(os.path.join(out_dir, "metadata.json"), metadata)
+        self._write_json(os.path.join(out_dir, "values.json"), self.values)
+        self._write_json(os.path.join(out_dir, "policy.json"), self.policy)
+        return out_dir
+
+    def load_table(self, table_dir):
+        """Load a global value table saved by save_table()."""
+        with open(os.path.join(table_dir, "values.json"), "r", encoding="utf-8") as f:
+            self.values = dict(json.load(f))
+        policy_path = os.path.join(table_dir, "policy.json")
+        if os.path.exists(policy_path):
+            with open(policy_path, "r", encoding="utf-8") as f:
+                self.policy = dict(json.load(f))
+        else:
+            self.policy = {}
+        metadata_path = os.path.join(table_dir, "metadata.json")
+        if os.path.exists(metadata_path):
+            with open(metadata_path, "r", encoding="utf-8") as f:
+                metadata = json.load(f)
+            self.stats.update(metadata.get("stats", {}))
+        self.root_hand = None
+        self.global_table_loaded = True
+        self.allow_online_fallback = False
+        self.action_cache = {}
+        return self
+
+    def _write_json(self, path, obj):
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(obj, f, indent=2, sort_keys=True)
+
+    def safe_filename(self, text):
+        return "".join(c if c.isalnum() else "_" for c in str(text or "empty"))

@@ -1,780 +1,230 @@
-# high_rank_montecarlo_agent.py
+# bayesian_sampled_search_agent.py
 # ------------------------------------------------------------
-# Python translation of the high-ranked Botzone C++ Dou Dizhu bot.
+# Bayesian sampled shallow adversarial search agent for Dou Dizhu.
 #
-# Goal:
-#   Keep the original implementation logic as close as possible, while changing
-#   only language/interface so it can be used locally with the same interface as
-#   rlcard_agent.py:
-#       agent = HighRankMonteCarloAgent(position="landlord")
-#       action = agent.act(infoset)
+# Public interface:
+#     agent = BayesianSampledSearchAgent(position="landlord")
+#     action = agent.act(infoset)
 #
-# The original C++ bot uses Botzone concrete cards 0..53. RLCard/DouZero infoset
-# usually uses rank codes 3,4,...,14,17,20,30. This file internally reconstructs
-# concrete 0..53 cards, runs the translated logic, then maps the chosen action
-# back to the exact legal action object from infoset.legal_actions whenever
-# possible.
+# Main idea:
+#   1. Use infoset to build a belief over hidden hands.
+#   2. Sample several deterministic hidden-card worlds.
+#   3. Prune root legal_actions to a small top-K candidate set.
+#   4. For each candidate action, run shallow team-aware adversarial search.
+#   5. Enemy nodes are NOT pure minimax; they use a greedy/softmax opponent model.
+#   6. Teammate nodes use cooperative softmax + a small max component.
+#
+# This is not a full perfect-information solver and not a full ISMCTS.
+# It is a practical determinization-style shallow search agent designed to be
+# much more relevant to Dou Dizhu than a reduced self-hand MDP.
 # ------------------------------------------------------------
 
-from __future__ import annotations
-
-import math 
+import math
 import random
 import time
+from collections import Counter
+from itertools import combinations
 from dataclasses import dataclass
-from enum import IntEnum
-from collections import Counter, defaultdict
-from typing import Dict, List, Iterable, Tuple, Optional, Any
 
+try:
+    from rlcard.games.doudizhu.utils import CARD_TYPE
+except Exception:
+    CARD_TYPE = None
 
-PLAYER_COUNT = 3
-
-
-class Stage(IntEnum):
-    BIDDING = 0
-    PLAYING = 1
-
-
-class CardComboType(IntEnum):
-    PASS_ = 0
-    SINGLE = 1
-    PAIR = 2
-    STRAIGHT = 3
-    STRAIGHT2 = 4
-    TRIPLET = 5
-    TRIPLET1 = 6
-    TRIPLET2 = 7
-    BOMB = 8
-    QUADRUPLE2 = 9
-    QUADRUPLE4 = 10
-    PLANE = 11
-    PLANE1 = 12
-    PLANE2 = 13
-    SSHUTTLE = 14
-    SSHUTTLE2 = 15
-    SSHUTTLE4 = 16
-    ROCKET = 17
-    INVALID = 18
-
-
-cardComboScores = [
-    0,   # PASS
-    1,   # SINGLE
-    2,   # PAIR
-    6,   # STRAIGHT
-    6,   # STRAIGHT2
-    4,   # TRIPLET
-    4,   # TRIPLET1
-    4,   # TRIPLET2
-    10,  # BOMB
-    8,   # QUADRUPLE2
-    8,   # QUADRUPLE4
-    8,   # PLANE
-    8,   # PLANE1
-    8,   # PLANE2
-    10,  # SSHUTTLE
-    10,  # SSHUTTLE2
-    10,  # SSHUTTLE4
-    16,  # ROCKET
-    0,   # INVALID
-]
-
-card_joker = 52
-card_JOKER = 53
-MAX_LEVEL = 15
-MAX_STRAIGHT_LEVEL = 11
-level_joker = 13
-level_JOKER = 14
-
-ALL_POSITIONS = ["landlord", "landlord_down", "landlord_up"]
-POS_INDEX = {"landlord": 0, "landlord_down": 1, "landlord_up": 2}
-INDEX_POS = {0: "landlord", 1: "landlord_down", 2: "landlord_up"}
 
 EnvCard2RealCard = {
     3: "3", 4: "4", 5: "5", 6: "6", 7: "7", 8: "8", 9: "9",
     10: "T", 11: "J", 12: "Q", 13: "K", 14: "A", 17: "2",
     20: "B", 30: "R",
 }
+
 RealCard2EnvCard = {
     "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9,
     "T": 10, "J": 11, "Q": 12, "K": 13, "A": 14, "2": 17,
     "B": 20, "R": 30,
 }
 
-
-def card2level(card: int) -> int:
-    return card // 4 + (1 if card == 53 else 0)
-
-
-def level_to_env(level: int) -> int:
-    if level <= 11:
-        return level + 3
-    if level == 12:
-        return 17
-    if level == 13:
-        return 20
-    if level == 14:
-        return 30
-    raise ValueError(f"bad level: {level}")
-
-
-def env_to_level(card: int) -> int:
-    if card == 17:
-        return 12
-    if card == 20:
-        return 13
-    if card == 30:
-        return 14
-    return int(card) - 3
-
-
-def concrete_ids_for_level(level: int) -> List[int]:
-    if level == level_joker:
-        return [52]
-    if level == level_JOKER:
-        return [53]
-    return [level * 4 + i for i in range(4)]
-
-
-def env_action_to_levels(action: Iterable[int]) -> List[int]:
-    return [env_to_level(c) for c in action]
-
-
-def env_action_to_concrete(action: Iterable[int], used: Optional[set] = None) -> List[int]:
-    """Allocate concrete 0..53 cards for a rank-only action."""
-    if used is None:
-        used = set()
-    out = []
-    for level in env_action_to_levels(action):
-        chosen = None
-        for cid in concrete_ids_for_level(level):
-            if cid not in used:
-                chosen = cid
-                break
-        if chosen is None:
-            # In inconsistent local infosets, reuse the first id rather than crashing.
-            chosen = concrete_ids_for_level(level)[0]
-        used.add(chosen)
-        out.append(chosen)
-    out.sort()
-    return out
-
-
-def concrete_action_to_env(action: Iterable[int]) -> List[int]:
-    return [level_to_env(card2level(c)) for c in sorted(action, key=lambda x: (card2level(x), x))]
-
-
-def canon_env(action: Iterable[int]) -> Tuple[int, ...]:
-    return tuple(sorted([int(x) for x in action], key=lambda x: (env_to_level(x), x)))
-
-
-@dataclass(order=False)
-class CardPack:
-    level: int
-    count: int
-
-    def sort_key(self):
-        # C++ CardPack operator< puts larger count first, and larger level first.
-        return (-self.count, -self.level)
-
-
-class CardCombo:
-    def __init__(self, cards: Optional[Iterable[int]] = None, combo_type: Optional[CardComboType] = None):
-        self.cards: List[int] = sorted(list(cards or []))
-        self.packs: List[CardPack] = []
-        self.comboType: CardComboType = CardComboType.PASS_
-        self.comboLevel: int = 0
-
-        if combo_type is not None:
-            self.comboType = combo_type
-            if combo_type == CardComboType.PASS_:
-                return
-            self._build_packs_only()
-            return
-
-        self._detect_type()
-
-    def clone(self) -> "CardCombo":
-        return CardCombo(self.cards, self.comboType)
-
-    def key(self) -> Tuple[int, ...]:
-        return tuple(sorted(self.cards))
-
-    def sort_key(self):
-        # Python version of C++ CardCombo::operator< key.
-        return tuple((p.count, p.level) for p in self.packs) + ((-len(self.packs),),)
-
-    def __hash__(self):
-        return hash(self.key())
-
-    def __eq__(self, other: object) -> bool:
-        return isinstance(other, CardCombo) and self.key() == other.key()
-
-    def __lt__(self, other: "CardCombo") -> bool:
-        n = min(len(self.packs), len(other.packs))
-        for i in range(n):
-            a = self.packs[i]
-            b = other.packs[i]
-            if a.count != b.count:
-                return a.count > b.count
-            if a.level != b.level:
-                return a.level > b.level
-        return len(self.packs) < len(other.packs)
-
-    def _build_packs_only(self):
-        counts = [0] * (MAX_LEVEL + 1)
-        for c in self.cards:
-            counts[card2level(c)] += 1
-        self.packs = [CardPack(level=l, count=counts[l]) for l in range(MAX_LEVEL + 1) if counts[l]]
-        self.packs.sort(key=lambda p: p.sort_key())
-        if self.packs:
-            self.comboLevel = self.packs[0].level
-
-    def findMaxSeq(self) -> int:
-        if not self.packs:
-            return 0
-        for c in range(1, len(self.packs)):
-            if self.packs[c].count != self.packs[0].count or self.packs[c].level != self.packs[c - 1].level - 1:
-                return c
-        return len(self.packs)
-
-    def getWeight(self) -> int:
-        if self.comboType in (CardComboType.SSHUTTLE, CardComboType.SSHUTTLE2, CardComboType.SSHUTTLE4):
-            return cardComboScores[int(self.comboType)] + (10 if self.findMaxSeq() > 2 else 0)
-        return cardComboScores[int(self.comboType)]
-
-    def _detect_type(self):
-        if not self.cards:
-            self.comboType = CardComboType.PASS_
-            return
-
-        counts = [0] * (MAX_LEVEL + 1)
-        countOfCount = [0] * 5
-        for c in self.cards:
-            counts[card2level(c)] += 1
-        for l in range(MAX_LEVEL + 1):
-            if counts[l]:
-                self.packs.append(CardPack(l, counts[l]))
-                if counts[l] <= 4:
-                    countOfCount[counts[l]] += 1
-        self.packs.sort(key=lambda p: p.sort_key())
-        self.comboLevel = self.packs[0].level
-
-        kind = [i for i in range(5) if countOfCount[i]]
-        kind.sort()
-
-        if len(kind) == 1:
-            curr = countOfCount[kind[0]]
-            k = kind[0]
-            if k == 1:
-                if curr == 1:
-                    self.comboType = CardComboType.SINGLE
-                    return
-                if curr == 2 and len(self.packs) > 1 and self.packs[1].level == level_joker:
-                    self.comboType = CardComboType.ROCKET
-                    return
-                if curr >= 5 and self.findMaxSeq() == curr and self.packs[0].level <= MAX_STRAIGHT_LEVEL:
-                    self.comboType = CardComboType.STRAIGHT
-                    return
-            elif k == 2:
-                if curr == 1:
-                    self.comboType = CardComboType.PAIR
-                    return
-                if curr >= 3 and self.findMaxSeq() == curr and self.packs[0].level <= MAX_STRAIGHT_LEVEL:
-                    self.comboType = CardComboType.STRAIGHT2
-                    return
-            elif k == 3:
-                if curr == 1:
-                    self.comboType = CardComboType.TRIPLET
-                    return
-                if self.findMaxSeq() == curr and self.packs[0].level <= MAX_STRAIGHT_LEVEL:
-                    self.comboType = CardComboType.PLANE
-                    return
-            elif k == 4:
-                if curr == 1:
-                    self.comboType = CardComboType.BOMB
-                    return
-                if self.findMaxSeq() == curr and self.packs[0].level <= MAX_STRAIGHT_LEVEL:
-                    self.comboType = CardComboType.SSHUTTLE
-                    return
-
-        elif len(kind) == 2:
-            curr = countOfCount[kind[1]]
-            lesser = countOfCount[kind[0]]
-            if kind[1] == 3:
-                if kind[0] == 1:
-                    if curr == 1 and lesser == 1:
-                        self.comboType = CardComboType.TRIPLET1
-                        return
-                    if self.findMaxSeq() == curr and lesser == curr and self.packs[0].level <= MAX_STRAIGHT_LEVEL:
-                        self.comboType = CardComboType.PLANE1
-                        return
-                if kind[0] == 2:
-                    if curr == 1 and lesser == 1:
-                        self.comboType = CardComboType.TRIPLET2
-                        return
-                    if self.findMaxSeq() == curr and lesser == curr and self.packs[0].level <= MAX_STRAIGHT_LEVEL:
-                        self.comboType = CardComboType.PLANE2
-                        return
-            if kind[1] == 4:
-                if kind[0] == 1:
-                    if curr == 1 and lesser == 2:
-                        self.comboType = CardComboType.QUADRUPLE2
-                        return
-                    if self.findMaxSeq() == curr and lesser == curr * 2 and self.packs[0].level <= MAX_STRAIGHT_LEVEL:
-                        self.comboType = CardComboType.SSHUTTLE2
-                        return
-                if kind[0] == 2:
-                    if curr == 1 and lesser == 2:
-                        self.comboType = CardComboType.QUADRUPLE4
-                        return
-                    if self.findMaxSeq() == curr and lesser == curr * 2 and self.packs[0].level <= MAX_STRAIGHT_LEVEL:
-                        self.comboType = CardComboType.SSHUTTLE4
-                        return
-
-        self.comboType = CardComboType.INVALID
-
-    def canBeBeatenBy(self, b: "CardCombo") -> bool:
-        if self.comboType == CardComboType.INVALID or b.comboType == CardComboType.INVALID:
-            return False
-        if b.comboType == CardComboType.ROCKET:
-            return True
-        if b.comboType == CardComboType.BOMB:
-            if self.comboType == CardComboType.ROCKET:
-                return False
-            if self.comboType == CardComboType.BOMB:
-                return b.comboLevel > self.comboLevel
-            return True
-        return b.comboType == self.comboType and len(b.cards) == len(self.cards) and b.comboLevel > self.comboLevel
-
-    def findFirstValid(self, cards: Iterable[int]) -> "CardCombo":
-        deck = sorted(list(cards))
-        if self.comboType == CardComboType.PASS_:
-            return CardCombo(deck[:1]) if deck else CardCombo()
-        if self.comboType == CardComboType.ROCKET:
-            return CardCombo()
-
-        counts = [0] * (MAX_LEVEL + 1)
-        for c in deck:
-            counts[card2level(c)] += 1
-        kindCount = sum(1 for c in counts if c)
-        if len(deck) >= len(self.cards):
-            mainPackCount = self.findMaxSeq()
-            isSequential = self.comboType in (
-                CardComboType.STRAIGHT, CardComboType.STRAIGHT2,
-                CardComboType.PLANE, CardComboType.PLANE1, CardComboType.PLANE2,
-                CardComboType.SSHUTTLE, CardComboType.SSHUTTLE2, CardComboType.SSHUTTLE4,
-            )
-            i = 1
-            while True:
-                failed_boundary = False
-                can_try = True
-                for j in range(mainPackCount):
-                    level = self.packs[j].level + i
-                    if ((self.comboType == CardComboType.SINGLE and level > MAX_LEVEL)
-                            or (isSequential and level > MAX_STRAIGHT_LEVEL)
-                            or (self.comboType != CardComboType.SINGLE and not isSequential and level >= level_joker)):
-                        failed_boundary = True
-                        break
-                    if counts[level] < self.packs[j].count:
-                        can_try = False
-                        break
-                if failed_boundary:
-                    break
-                if can_try:
-                    if kindCount >= len(self.packs):
-                        required = [0] * (MAX_LEVEL + 1)
-                        for j in range(mainPackCount):
-                            required[self.packs[j].level + i] = self.packs[j].count
-                        ok = True
-                        for j in range(mainPackCount, len(self.packs)):
-                            found = False
-                            for k in range(MAX_LEVEL + 1):
-                                if required[k] or counts[k] < self.packs[j].count:
-                                    continue
-                                required[k] = self.packs[j].count
-                                found = True
-                                break
-                            if not found:
-                                ok = False
-                                break
-                        if ok:
-                            solve = []
-                            req = required[:]
-                            for c in deck:
-                                lv = card2level(c)
-                                if req[lv]:
-                                    solve.append(c)
-                                    req[lv] -= 1
-                            return CardCombo(solve)
-                i += 1
-
-        # failure: bombs, then rocket
-        for i in range(level_joker):
-            if counts[i] == 4 and (self.comboType != CardComboType.BOMB or i > self.packs[0].level):
-                return CardCombo([i * 4, i * 4 + 1, i * 4 + 2, i * 4 + 3])
-        if counts[level_joker] + counts[level_JOKER] == 2:
-            return CardCombo([card_joker, card_JOKER])
-        return CardCombo()
-
-
-class CardCombinations:
-    def __init__(self, cards: Optional[Iterable[int]] = None):
-        self.packs = []
-        for i in range(MAX_LEVEL):
-            self.packs.append({"level": i, "count": 0, "card": []})
-        if cards is not None:
-            for c in cards:
-                l = card2level(int(c))
-                self.packs[l]["card"].append(int(c))
-                self.packs[l]["card"].sort()
-                self.packs[l]["count"] += 1
-
-        self.single: List[CardCombo] = []
-        self.pair: List[CardCombo] = []
-        self.straight: List[List[CardCombo]] = [[] for _ in range(13)]
-        self.straight2: List[List[CardCombo]] = [[] for _ in range(11)]
-        self.triplet: List[CardCombo] = []
-        self.triplet1: List[CardCombo] = []
-        self.triplet2: List[CardCombo] = []
-        self.bomb: List[CardCombo] = []
-        self.quadruple2: List[CardCombo] = []
-        self.quadruple4: List[CardCombo] = []
-        self.plane: List[List[CardCombo]] = [[] for _ in range(7)]
-        self.plane1: List[List[CardCombo]] = [[] for _ in range(7)]
-        self.plane2: List[List[CardCombo]] = [[] for _ in range(7)]
-        self.sshuttle: List[CardCombo] = []
-        self.sshuttle2: List[CardCombo] = []
-        self.sshuttle4: List[CardCombo] = []
-        self.rocket: List[CardCombo] = []
-
-    def clone(self) -> "CardCombinations":
-        return CardCombinations(self.all_cards())
-
-    def all_cards(self) -> List[int]:
-        out = []
-        for p in self.packs:
-            out.extend(p["card"][:p["count"]])
-        return sorted(out)
-
-    def getLength(self) -> int:
-        return sum(p["count"] for p in self.packs)
-
-    def erase(self, cards: Iterable[int]):
-        for c in cards:
-            l = card2level(int(c))
-            pack = self.packs[l]
-            if int(c) in pack["card"]:
-                pack["card"].remove(int(c))
-            elif pack["card"]:
-                # Should not happen if state is consistent. Match C++'s assumption by
-                # removing one card of that level anyway.
-                pack["card"].pop(0)
-            pack["count"] -= 1
-            if pack["count"] < 0:
-                pack["count"] = 0
-
-    def insert(self, cards: Iterable[int]):
-        for c in cards:
-            l = card2level(int(c))
-            pack = self.packs[l]
-            if int(c) not in pack["card"]:
-                pack["card"].append(int(c))
-                pack["card"].sort()
-                pack["count"] += 1
-
-    def getAllSingle(self):
-        self.single = []
-        for i in range(15):
-            if self.packs[i]["count"]:
-                self.single.append(CardCombo(self.packs[i]["card"][:1], CardComboType.SINGLE))
-
-    def getAllPair(self):
-        self.pair = []
-        for i in range(13):
-            if self.packs[i]["count"] >= 2:
-                self.pair.append(CardCombo(self.packs[i]["card"][:2], CardComboType.PAIR))
-
-    def getAllStraight(self):
-        for length in range(5, 13):
-            self.straight[length] = []
-            for i in range(0, 12 - length + 1):
-                if all(self.packs[j]["count"] >= 1 for j in range(i, i + length)):
-                    cards = [self.packs[j]["card"][0] for j in range(i, i + length)]
-                    self.straight[length].append(CardCombo(cards, CardComboType.STRAIGHT))
-
-    def getAllStraight2(self):
-        for length in range(3, 11):
-            self.straight2[length] = []
-            for i in range(0, 12 - length + 1):
-                if all(self.packs[j]["count"] >= 2 for j in range(i, i + length)):
-                    cards = []
-                    for j in range(i, i + length):
-                        cards.extend(self.packs[j]["card"][:2])
-                    self.straight2[length].append(CardCombo(cards, CardComboType.STRAIGHT2))
-
-    def getAllTriplet(self):
-        self.triplet = []
-        for i in range(13):
-            if self.packs[i]["count"] >= 3:
-                self.triplet.append(CardCombo(self.packs[i]["card"][:3], CardComboType.TRIPLET))
-
-    def getAllTriplet1(self):
-        self.triplet1 = []
-        for i in range(13):
-            if self.packs[i]["count"] < 3:
-                continue
-            for j in range(15):
-                if j == i:
-                    continue
-                if self.packs[j]["count"]:
-                    cards = self.packs[i]["card"][:3] + self.packs[j]["card"][:1]
-                    self.triplet1.append(CardCombo(cards, CardComboType.TRIPLET1))
-
-    def getAllTriplet2(self):
-        self.triplet2 = []
-        for i in range(13):
-            if self.packs[i]["count"] < 3:
-                continue
-            for j in range(13):
-                if j == i:
-                    continue
-                if self.packs[j]["count"] >= 2:
-                    cards = self.packs[i]["card"][:3] + self.packs[j]["card"][:2]
-                    self.triplet2.append(CardCombo(cards, CardComboType.TRIPLET2))
-
-    def getAllBomb(self):
-        self.bomb = []
-        for i in range(13):
-            if self.packs[i]["count"] == 4:
-                self.bomb.append(CardCombo(self.packs[i]["card"][:4], CardComboType.BOMB))
-
-    def getAllQuadruple2(self):
-        self.quadruple2 = []
-        for i in range(13):
-            if self.packs[i]["count"] != 4:
-                continue
-            for j in range(15):
-                if j == i or self.packs[j]["count"] == 0:
-                    continue
-                for k in range(j + 1, 15):
-                    if k == i or k == j or self.packs[k]["count"] == 0:
-                        continue
-                    cards = self.packs[i]["card"][:4] + self.packs[j]["card"][:1] + self.packs[k]["card"][:1]
-                    self.quadruple2.append(CardCombo(cards, CardComboType.QUADRUPLE2))
-
-    def getAllQuadruple4(self):
-        self.quadruple4 = []
-        for i in range(13):
-            if self.packs[i]["count"] < 4:
-                continue
-            for j in range(13):
-                if j == i or self.packs[j]["count"] < 2:
-                    continue
-                for k in range(j + 1, 13):
-                    if k == i or k == j or self.packs[k]["count"] < 2:
-                        continue
-                    cards = self.packs[i]["card"][:4] + self.packs[j]["card"][:2] + self.packs[k]["card"][:2]
-                    self.quadruple4.append(CardCombo(cards, CardComboType.QUADRUPLE4))
-
-    def getAllPlane(self):
-        for length in range(2, 7):
-            self.plane[length] = []
-            for i in range(0, 12 - length + 1):
-                if all(self.packs[j]["count"] >= 3 for j in range(i, i + length)):
-                    cards = []
-                    for j in range(i, i + length):
-                        cards.extend(self.packs[j]["card"][:3])
-                    self.plane[length].append(CardCombo(cards, CardComboType.PLANE))
-
-    def getAllPlane1(self):
-        for length in range(2, 6):
-            self.plane1[length] = []
-            for i in range(0, 12 - length + 1):
-                if not all(self.packs[j]["count"] >= 3 for j in range(i, i + length)):
-                    continue
-                seq = []
-                for j in range(i, i + length):
-                    seq.extend(self.packs[j]["card"][:3])
-                solution = seq[:]
-
-                def dfs(w: int, low: int):
-                    if w == 0:
-                        self.plane1[length].append(CardCombo(solution, CardComboType.PLANE1))
-                        return
-                    for l in range(low, 15):
-                        if i <= l <= i + length - 1:
-                            continue
-                        if self.packs[l]["count"] == 0:
-                            continue
-                        solution.append(self.packs[l]["card"][0])
-                        dfs(w - 1, l + 1)
-                        solution.pop()
-
-                dfs(length, 0)
-
-    def getAllPlane2(self):
-        for length in range(2, 5):
-            self.plane2[length] = []
-            for i in range(0, 12 - length + 1):
-                if not all(self.packs[j]["count"] >= 3 for j in range(i, i + length)):
-                    continue
-                seq = []
-                for j in range(i, i + length):
-                    seq.extend(self.packs[j]["card"][:3])
-                solution = seq[:]
-
-                def dfs(w: int, low: int):
-                    if w == 0:
-                        self.plane2[length].append(CardCombo(solution, CardComboType.PLANE2))
-                        return
-                    for l in range(low, 13):
-                        if i <= l <= i + length - 1:
-                            continue
-                        if self.packs[l]["count"] < 2:
-                            continue
-                        solution.extend(self.packs[l]["card"][:2])
-                        dfs(w - 1, l + 1)
-                        solution.pop(); solution.pop()
-
-                dfs(length, 0)
-
-    def getAllSshuttle(self):
-        self.sshuttle = []
-        for i in range(0, 11):
-            if self.packs[i]["count"] != 4:
-                continue
-            j = i + 1
-            solution = self.packs[i]["card"][:4]
-            while j <= 11 and self.packs[j]["count"] == 4:
-                solution.extend(self.packs[j]["card"][:4])
-                self.sshuttle.append(CardCombo(solution, CardComboType.SSHUTTLE))
-                j += 1
-
-    def getAllSshuttle2(self):
-        self.sshuttle2 = []
-        for i in range(0, 11):
-            if self.packs[i]["count"] != 4:
-                continue
-            sequence = self.packs[i]["card"][:4]
-            k = i + 1
-            while k <= 11 and self.packs[k]["count"] == 4:
-                sequence.extend(self.packs[k]["card"][:4])
-                w_need = 2 * (k - i + 1)
-                if w_need > 13 - k + i:
-                    break
-                solution = sequence[:]
-
-                def dfs(w: int, low: int):
-                    if w == 0:
-                        self.sshuttle2.append(CardCombo(solution, CardComboType.SSHUTTLE2))
-                        return
-                    for l in range(low, 15):
-                        if i <= l <= k:
-                            continue
-                        if self.packs[l]["count"] == 0:
-                            continue
-                        solution.append(self.packs[l]["card"][0])
-                        dfs(w - 1, l + 1)
-                        solution.pop()
-
-                dfs(w_need, 0)
-                k += 1
-
-    def getAllSshuttle4(self):
-        self.sshuttle4 = []
-        for i in range(0, 11):
-            if self.packs[i]["count"] != 4:
-                continue
-            sequence = self.packs[i]["card"][:4]
-            k = i + 1
-            while k <= 11 and self.packs[k]["count"] == 4:
-                sequence.extend(self.packs[k]["card"][:4])
-                w_need = 2 * (k - i + 1)
-                if w_need > 11 - k + i:
-                    break
-                solution = sequence[:]
-
-                def dfs(w: int, low: int):
-                    if w == 0:
-                        self.sshuttle4.append(CardCombo(solution, CardComboType.SSHUTTLE4))
-                        return
-                    for l in range(low, 13):
-                        if i <= l <= k:
-                            continue
-                        if self.packs[l]["count"] < 2:
-                            continue
-                        solution.extend(self.packs[l]["card"][:2])
-                        dfs(w - 1, l + 1)
-                        solution.pop(); solution.pop()
-
-                dfs(w_need, 0)
-                k += 1
-
-    def getAllRocket(self):
-        self.rocket = []
-        if self.packs[13]["count"] and self.packs[14]["count"]:
-            self.rocket.append(CardCombo([52, 53], CardComboType.ROCKET))
-
-    def getAllCombos(self):
-        self.getAllSingle()
-        self.getAllPair()
-        self.getAllStraight()
-        self.getAllStraight2()
-        self.getAllTriplet()
-        self.getAllTriplet1()
-        self.getAllTriplet2()
-        self.getAllBomb()
-        self.getAllQuadruple2()
-        self.getAllQuadruple4()
-        self.getAllPlane()
-        self.getAllPlane1()
-        self.getAllPlane2()
-        self.getAllSshuttle()
-        self.getAllSshuttle2()
-        self.getAllSshuttle4()
-        self.getAllRocket()
-
-
-@dataclass
-class TreeNode:
-    turn: int
-    hands: List[CardCombinations]
-
-    def clone(self) -> "TreeNode":
-        return TreeNode(self.turn, [h.clone() for h in self.hands])
-
-
-class HighRankMonteCarloAgent:
+INDEX = {
+    "3": 0, "4": 1, "5": 2, "6": 3, "7": 4, "8": 5, "9": 6,
+    "T": 7, "J": 8, "Q": 9, "K": 10, "A": 11, "2": 12,
+    "B": 13, "R": 14,
+}
+
+CARD_ORDER = ["3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A", "2", "B", "R"]
+NORMAL_CHAIN_ORDER = ["3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"]
+ALL_POSITIONS = ["landlord", "landlord_down", "landlord_up"]
+POS_INDEX = {"landlord": 0, "landlord_down": 1, "landlord_up": 2}
+INDEX_POS = {0: "landlord", 1: "landlord_down", 2: "landlord_up"}
+
+
+@dataclass(frozen=True)
+class SimState:
+    hands_tuple: tuple          # ((pos, hand_str), ...), ordered by ALL_POSITIONS
+    current_player: str
+    last_move: str              # last non-pass move; empty means current player leads
+    last_pid: str               # player who made last non-pass move, or None
+    passes_after_last: int      # consecutive passes since last non-pass move
+
+
+class AdversarialSearchAgent(object):
     """
-    Local Python version of the high-ranked Botzone C++ bot.
+    Bayesian sampled shallow adversarial search agent.
 
-    Public interface is compatible with rlcard_agent.py:
-        agent = HighRankMonteCarloAgent(position="landlord")
+    It keeps the same external interface as common DouZero agents:
         action = agent.act(infoset)
 
-    Parameters:
-        time_limit_sec: simulation budget per action. The original C++ code uses
-                        about 0.95s. Python is slower, so you may reduce it for
-                        local batch evaluation.
-        n_root_actions: original code uses top 3 root actions.
+    Unlike the previous reduced MDP/value-DP agent, this agent explicitly asks:
+        "If I play this action, how are opponent/teammate likely to respond?"
+
+    Implementation notes:
+    - Root actions are always taken from infoset.legal_actions.
+    - Opponent/teammate actions inside search are generated by an internal
+      Dou Dizhu action generator and legality checker.
+    - Hidden hands are sampled from remaining unknown cards and num_cards_left.
+    - Enemy nodes use a greedy/softmax opponent model instead of pure minimax,
+      because paranoid minimax is often too conservative in Dou Dizhu.
     """
 
-    def __init__(self, position: str, debug: bool = False, time_limit_sec: float = 0.95, n_root_actions: int = 3, seed: Optional[int] = None):
-        self.name = "HighRankMonteCarloBot_Python"
+    def __init__(self, position, debug=False, seed=None):
+        self.name = "BayesianSampledSearch_teammate_softmax_v1"
         self.position = position
         self.debug = debug
-        self.time_limit_sec = time_limit_sec
-        self.n_root_actions = n_root_actions
         self.rng = random.Random(seed)
-        self.last_error = None
-        self.last_debug = None
-        self.stats = {"acts": 0, "fallbacks": 0, "rollouts": 0}
-        self.reset_runtime_state()
 
-    # ---------------- interface ----------------
+        self.cfg = {
+            # Search budget. Increase samples/depth if speed allows.
+            "num_samples": 200000,
+            "search_depth": 3,            # includes plies after root action
+            "time_budget_sec": 0.20,       # soft budget per act; fallback if exceeded
+            "root_topk_leading": 7,
+            "root_topk_following": 5,
+            "sim_topk_leading": 5,
+            "sim_topk_following": 4,
+            "enemy_model_width": 2,
+            "enemy_softmax_temp": 7.0,
+            "ally_max_width": 4,
+
+            # Teammate model.
+            # Original version used pure max for all teammate nodes:
+            #     V_teammate(s) = max_a V(s, a)
+            # This is too optimistic for farmers, because the teammate does not
+            # know our hand and may not perfectly follow the searched line.
+            # The new version uses:
+            #     V_teammate = (1 - mix) * softmax_expectation + mix * max
+            # Smaller teammate_max_mix -> less idealized teammate.
+            "teammate_softmax_temp": 7.0,
+            "teammate_max_mix": 0.20,
+
+            # Candidate generation limits.
+            "max_generated_actions_per_state": 120,
+            "max_wing_combinations": 12,
+
+            # Terminal values.
+            "win_value": 10000.0,
+            "loss_value": -10000.0,
+
+            # Root immediate tactical bonus. These are added to sampled search value.
+            "root_finish_bonus": 500.0,
+            "root_beat_enemy_bonus": 45.0,
+            "root_enemy_danger_bonus": 120.0,
+            "root_pass_enemy_penalty": -90.0,
+            "root_pass_enemy_danger_penalty": -220.0,
+            "root_teammate_release_bonus": 180.0,
+            "root_beat_teammate_penalty": -180.0,
+            "root_bomb_nonfinish_penalty": -60.0,
+            "root_lead_high_single_penalty": 1.2,
+            "root_risk_weight": 12.0,
+
+            # Evaluation weights.
+            "eval_badness_weight": 1.0,
+            "eval_count_weight": 7.0,
+            "eval_enemy_danger_penalty": 180.0,
+            "eval_team_danger_bonus": 120.0,
+            "eval_initiative_bonus": 16.0,
+            "eval_last_pid_bonus": 24.0,
+            "eval_bomb_bonus": 16.0,
+            "eval_control_bonus": 3.5,
+
+            # Action heuristic weights.
+            "lead_hand_improve_weight": 8.0,
+            "lead_len_weight": 1.2,
+            "lead_min_card_bonus": 10.0,
+            "lead_chain_bonus": 18.0,
+            "lead_chain_len_bonus": 1.0,
+            "lead_trio_bonus": 9.0,
+            "lead_pair_bonus": 4.0,
+            "lead_single_rank_penalty": 0.55,
+            "lead_bomb_penalty": 80.0,
+            "lead_control_cost_weight": 1.5,
+
+            "follow_cost_len_weight": 0.45,
+            "follow_cost_rank_weight": 0.12,
+            "follow_cost_bomb_weight": 75.0,
+            "follow_same_type_bonus": 18.0,
+            "follow_enemy_bonus": 25.0,
+            "follow_enemy_danger_bonus": 100.0,
+            "follow_teammate_pass_bonus": 80.0,
+            "follow_beat_teammate_penalty": 120.0,
+            "follow_pass_base": 0.0,
+
+            # Danger thresholds.
+            "danger_cards": 2,
+            "very_danger_cards": 1,
+            "teammate_release_cards": 2,
+
+            # Bayesian belief parameters.
+            "rocket_prob": 0.25,
+            "bomb_prob_per_possible": 0.13,
+            "bomb_prob_cap": 0.65,
+            "higher_bomb_risk_weight": 0.12,
+            "risk_cap": 0.9,
+            "bomb_risk_weight": 0.25,
+            "rocket_risk_weight": 0.15,
+            "same_type_risk_cap": 0.8,
+            "same_type_exp_weight": 0.35,
+
+            # Hand badness parameters.
+            "badness_turn_weight": 7.0,
+            "badness_single_weight": 3.0,
+            "badness_len_weight": 1.2,
+            "badness_chain_discount_weight": 5.0,
+            "badness_control_discount": 2.2,
+            "badness_bomb_discount": 3.0,
+            "solo_chain_coef": 1.0,
+            "pair_chain_coef": 1.5,
+            "trio_chain_coef": 2.0,
+
+            # Cost of control cards.
+            "A_cost": 1.5,
+            "2_cost": 4.5,
+            "B_cost": 7.0,
+            "R_cost": 8.0,
+            "danger_control_scale": 0.45,
+        }
+
+        self.action_cache = {}
+        self.fallback_count = 0
+        self.last_error = None
+        self.stats = {
+            "acts": 0,
+            "fallbacks": 0,
+            "samples_used": 0,
+            "time_cutoffs": 0,
+        }
+        self._deadline = None
+        self._search_cache = {}
+
+    # ============================================================
+    # Public API
+    # ============================================================
+
     def act(self, infoset):
+        """Return one action from infoset.legal_actions."""
         self.stats["acts"] += 1
+        start_time = time.monotonic()
+        self._deadline = start_time + self.cfg["time_budget_sec"]
+        self._search_cache = {}
+
         try:
             legal_actions = getattr(infoset, "legal_actions", [])
             if not legal_actions:
@@ -782,1036 +232,1297 @@ class HighRankMonteCarloAgent:
             if len(legal_actions) == 1:
                 return legal_actions[0]
 
-            self.reset_runtime_state()
-            self.read_infoset(infoset)
-            self.prepareData()
+            root_state = self.extract_state(infoset)
+            belief = self.infer_belief(infoset, root_state)
 
-            # Direct finish should always be legal and dominant.
-            for a in legal_actions:
-                if a and len(a) == len(getattr(infoset, "player_hand_cards", [])):
-                    return a
+            # Direct finish always dominates.
+            finish_actions = [
+                a for a in legal_actions
+                if a != [] and len(self.env_cards_to_real_str(a)) == root_state["my_count"]
+            ]
+            if finish_actions:
+                return self.choose_lowest_cost_action(finish_actions, root_state)
 
-            if not self.whatTheyPlayed[self.myPosition]:
-                myAction = self.findBestAction(self.myHand, self.lastValidCombo, self.myPosition, self.landlordPosition)
-            else:
-                myAction = self.returnAction()
-            if not myAction.cards and self.rootActions:
-                myAction = self.rootActions[0]
+            candidates = self.prune_root_actions(legal_actions, root_state, belief)
+            if not candidates:
+                return self.greedy_fallback_action(legal_actions, root_state, belief)
 
-            action_env = concrete_action_to_env(myAction.cards)
-            matched = self.match_legal_action(action_env, legal_actions)
-            if matched is not None:
-                return matched
+            samples = self.sample_determinizations(infoset, root_state, n=self.cfg["num_samples"])
+            if not samples:
+                return self.greedy_fallback_action(legal_actions, root_state, belief)
 
-            # Safety: if translated action is not in the RLCard legal set, use
-            # the closest legal action according to the same heuristic measure.
-            fallback = self.choose_best_from_legal_actions(infoset, legal_actions)
-            return fallback if fallback is not None else random.choice(legal_actions)
+            best_value = -float("inf")
+            best_actions = []
+
+            for action in candidates:
+                if self.time_exceeded():
+                    self.stats["time_cutoffs"] += 1
+                    break
+                value = self.evaluate_root_action(action, root_state, belief, samples)
+                if value > best_value:
+                    best_value = value
+                    best_actions = [action]
+                elif value == best_value:
+                    best_actions.append(action)
+
+            if not best_actions:
+                return self.greedy_fallback_action(legal_actions, root_state, belief)
+
+            chosen = self.choose_lowest_cost_action(best_actions, root_state)
+            if chosen not in legal_actions:
+                return self.greedy_fallback_action(legal_actions, root_state, belief)
+            return chosen
 
         except Exception as e:
+            self.fallback_count += 1
             self.stats["fallbacks"] += 1
             self.last_error = repr(e)
             legal_actions = getattr(infoset, "legal_actions", [])
-            return random.choice(legal_actions) if legal_actions else []
+            if legal_actions:
+                try:
+                    state = self.extract_state(infoset)
+                    belief = self.infer_belief(infoset, state)
+                    return self.greedy_fallback_action(legal_actions, state, belief)
+                except Exception:
+                    return random.choice(legal_actions)
+            return []
 
-    # ---------------- C++ global-state reset/read ----------------
-    def reset_runtime_state(self):
-        self.myCards: set[int] = set()
-        self.landlordPublicCards: set[int] = set()
-        self.whatTheyPlayed: List[List[List[int]]] = [[] for _ in range(PLAYER_COUNT)]
-        self.lastValidCombo = CardCombo()
-        self.lastValidPlayer = -1
-        self.cardRemaining = [17, 17, 17]
-        self.myPosition = POS_INDEX.get(self.position, 0)
-        self.landlordPosition = 0
-        self.landlordBid = -1
-        self.stage = Stage.PLAYING
-        self.bidInput: List[int] = []
-        self.startTime = time.perf_counter()
-        self.gamesSimulated = 0
-        self.differenceBetweenFirstAndSecond = 0
+    # ============================================================
+    # Root action evaluation
+    # ============================================================
 
-        self.remainingCards: set[int] = set()
-        self.myHand = CardCombinations()
-        self.nextHand = CardCombinations()
-        self.previousHand = CardCombinations()
-        self.rootActions: List[CardCombo] = []
-        self.winningTimes: Dict[Tuple[int, ...], int] = {}
-        self.rootActionByKey: Dict[Tuple[int, ...], CardCombo] = {}
-        self.totalScore = 1
-        self.landlordHasNotPlayed = True
-        self.landlordHasNotPlayed_ = True
-        self.root = TreeNode(self.myPosition, [CardCombinations(), CardCombinations(), CardCombinations()])
-        self.sons: List[Tuple[CardCombo, TreeNode]] = []
+    def evaluate_root_action(self, action, root_state, belief, samples):
+        action_str = self.env_cards_to_real_str(action)
+        immediate = self.root_immediate_score(action, root_state, belief)
 
-    def read_infoset(self, infoset):
-        self.myPosition = POS_INDEX.get(self.position, 0)
-        self.landlordPosition = 0
-        self.landlordBid = 3
-        self.stage = Stage.PLAYING
+        total = 0.0
+        used = 0
+        for hands in samples:
+            if self.time_exceeded():
+                break
 
-        # Own hand: rank-only RLCard cards -> concrete 0..53 cards.
-        used = set()
-        self.myCards = set(env_action_to_concrete(getattr(infoset, "player_hand_cards", []), used))
+            sim = self.build_initial_sim_state(root_state, hands)
+            if not self.can_apply_action(sim, self.position, action_str):
+                continue
 
-        # Remaining card counts.
-        self.cardRemaining = self.get_num_cards_left(infoset)
-        self.cardRemaining[self.myPosition] = len(self.myCards)
+            next_sim = self.apply_action(sim, action_str)
+            val = self.search(next_sim, self.cfg["search_depth"] - 1)
+            total += val
+            used += 1
 
-        # Last two moves. In local DouZero/RLCard infoset, these are rank-only actions.
-        history_env = getattr(infoset, "last_two_moves", [[], []])
-        history_env = [list(x) for x in history_env]
-        while len(history_env) < 2:
-            history_env.insert(0, [])
-        history_env = history_env[-2:]
+        if used == 0:
+            return immediate - 1e6
 
-        played_used = set(self.myCards)
-        history = [env_action_to_concrete(h, played_used) for h in history_env]
+        self.stats["samples_used"] += used
+        return immediate + total / used
 
-        howManyPass = 0
-        whoInHistory = [(self.myPosition - 2 + PLAYER_COUNT) % PLAYER_COUNT, (self.myPosition - 1 + PLAYER_COUNT) % PLAYER_COUNT]
-        for p in range(2):
-            player = whoInHistory[p]
-            playedCards = history[p]
-            self.whatTheyPlayed[player].append(playedCards)
-            self.cardRemaining[player] = max(0, self.cardRemaining[player] - len(playedCards))
-            if len(playedCards) == 0:
-                howManyPass += 1
+    def root_immediate_score(self, action, state, belief):
+        hand = state["my_hand"]
+
+        if action == []:
+            score = 0.0
+            if self.is_teammate_last_player(state):
+                score += self.cfg["root_teammate_release_bonus"]
+            if self.is_enemy_last_player(state):
+                score += self.cfg["root_pass_enemy_penalty"]
+                if state["dangerous"]:
+                    score += self.cfg["root_pass_enemy_danger_penalty"]
+            if state["leading_round"]:
+                score -= 1e5
+            return score
+
+        action_str = self.env_cards_to_real_str(action)
+        if not action_str:
+            return -1e6
+
+        action_type, _ = self.get_card_type(action_str)
+        next_hand = self.remove_action_from_hand(hand, action_str)
+
+        score = 0.0
+        if next_hand == "":
+            score += self.cfg["root_finish_bonus"]
+
+        if not state["leading_round"]:
+            if self.is_enemy_last_player(state):
+                score += self.cfg["root_beat_enemy_bonus"]
+                if state["dangerous"]:
+                    score += self.cfg["root_enemy_danger_bonus"]
+            if self.is_teammate_last_player(state) and next_hand != "":
+                score += self.cfg["root_beat_teammate_penalty"]
+
+        if state["leading_round"] and len(action_str) == 1:
+            score -= self.cfg["root_lead_high_single_penalty"] * self.main_rank_value(action_str)
+
+        if self.is_bomb_or_rocket(action_type) and next_hand != "":
+            # Bombs are allowed, but must prove themselves through search.
+            score += self.cfg["root_bomb_nonfinish_penalty"]
+
+        risk = self.estimate_beaten_risk(action_str, action_type, belief)
+        if next_hand != "":
+            score -= self.cfg["root_risk_weight"] * risk
+        return score
+
+    # ============================================================
+    # Shallow adversarial/team search
+    # ============================================================
+
+    def search(self, sim, depth):
+        winner = self.terminal_winner(sim)
+        if winner is not None:
+            return self.terminal_value(winner)
+
+        if depth <= 0 or self.time_exceeded():
+            return self.evaluate_sim_state(sim)
+
+        key = (sim, depth)
+        if key in self._search_cache:
+            return self._search_cache[key]
+
+        actions = self.legal_actions_for_sim(sim)
+        if not actions:
+            return self.evaluate_sim_state(sim)
+
+        current = sim.current_player
+
+        if current == self.position:
+            # Self node: the root agent is assumed to choose the best action
+            # according to its own search value.
+            pruned = self.prune_sim_actions(actions, sim, root_team_node=True)
+            values = []
+            for a in pruned[: self.cfg["ally_max_width"]]:
+                ns = self.apply_action(sim, a)
+                values.append(self.search(ns, depth - 1))
+            val = max(values) if values else self.evaluate_sim_state(sim)
+
+        elif self.same_team(current, self.position):
+            # Teammate node: cooperative, but not perfectly optimal.
+            #
+            # Original version used pure max:
+            #     V(s) = max_a V(s, a)
+            # This makes farmer agents too optimistic, because it assumes the
+            # teammate always understands and executes the best cooperative line.
+            #
+            # New version:
+            #     V_teammate(s)
+            #       = (1 - mu) * sum_a softmax(score(a)) * V(s, a)
+            #         + mu * max_a V(s, a)
+            #
+            # This keeps some cooperative assumption, but avoids treating the
+            # teammate as a perfect oracle.
+            pruned = self.prune_sim_actions(actions, sim, root_team_node=True)
+            model_actions = pruned[: self.cfg["ally_max_width"]]
+            if not model_actions:
+                val = self.evaluate_sim_state(sim)
             else:
-                self.lastValidCombo = CardCombo(playedCards)
+                values = []
+                scores = []
+                for a in model_actions:
+                    ns = self.apply_action(sim, a)
+                    values.append(self.search(ns, depth - 1))
+                    scores.append(self.sim_action_policy_score(a, sim, root_team_node=True))
 
-        if howManyPass == 2:
-            self.lastValidCombo = CardCombo()
-        self.lastValidPlayer = (self.myPosition + 2 - howManyPass) % 3
+                weights = self.softmax(scores, temp=self.cfg["teammate_softmax_temp"])
+                soft_val = sum(w * v for w, v in zip(weights, values))
+                max_val = max(values)
 
-        # If full action history is available, use it only to improve remainingCards
-        # and landlord spring information. Exact player assignment is best-effort.
-        seq = getattr(infoset, "card_play_action_seq", None)
-        if seq:
-            self.whatTheyPlayed = [[] for _ in range(PLAYER_COUNT)]
-            seq_used = set(self.myCards)
-            # In Dou Dizhu, play starts from landlord and rotates.
-            for i, action in enumerate(seq):
-                player = (self.landlordPosition + i) % 3
-                concrete = env_action_to_concrete(action, seq_used)
-                self.whatTheyPlayed[player].append(concrete)
-            # Recompute last non-pass from seq if available.
-            trailing = 0
-            self.lastValidCombo = CardCombo()
-            self.lastValidPlayer = -1
-            for idx in range(len(seq) - 1, -1, -1):
-                player = (self.landlordPosition + idx) % 3
-                concrete = env_action_to_concrete(seq[idx], set())
-                if concrete:
-                    self.lastValidCombo = CardCombo(concrete)
-                    self.lastValidPlayer = player
+                mix = float(self.cfg.get("teammate_max_mix", 0.20))
+                mix = max(0.0, min(1.0, mix))
+                val = (1.0 - mix) * soft_val + mix * max_val
+
+        else:
+            # Enemy nodes: not pure minimax. Use a greedy/softmax opponent model.
+            pruned = self.prune_sim_actions(actions, sim, root_team_node=False)
+            model_actions = pruned[: self.cfg["enemy_model_width"]]
+            if not model_actions:
+                val = self.evaluate_sim_state(sim)
+            else:
+                scores = [self.sim_action_policy_score(a, sim, root_team_node=False) for a in model_actions]
+                weights = self.softmax(scores, temp=self.cfg["enemy_softmax_temp"])
+                val = 0.0
+                for w, a in zip(weights, model_actions):
+                    ns = self.apply_action(sim, a)
+                    val += w * self.search(ns, depth - 1)
+
+        self._search_cache[key] = val
+        return val
+
+    def terminal_winner(self, sim):
+        hands = self.tuple_to_hands(sim.hands_tuple)
+        for p, h in hands.items():
+            if len(h) == 0:
+                return p
+        return None
+
+    def terminal_value(self, winner):
+        return self.cfg["win_value"] if self.same_team(winner, self.position) else self.cfg["loss_value"]
+
+    def evaluate_sim_state(self, sim):
+        hands = self.tuple_to_hands(sim.hands_tuple)
+
+        landlord = "landlord"
+        farmers = ["landlord_down", "landlord_up"]
+
+        def good_value(pos):
+            h = hands[pos]
+            return -self.cfg["eval_badness_weight"] * self.hand_badness(h) - self.cfg["eval_count_weight"] * len(h)
+
+        if self.position == landlord:
+            root_team_good = good_value(landlord)
+            enemy_good = max(good_value(farmers[0]), good_value(farmers[1]))
+            val = root_team_good - enemy_good
+        else:
+            teammate = self.get_teammate_position()
+            root_team_good = max(good_value(self.position), good_value(teammate))
+            enemy_good = good_value(landlord)
+            val = root_team_good - enemy_good
+
+        # Danger adjustments.
+        for p in ALL_POSITIONS:
+            n = len(hands[p])
+            if n <= self.cfg["very_danger_cards"]:
+                bonus = self.cfg["eval_team_danger_bonus"] if self.same_team(p, self.position) else -self.cfg["eval_enemy_danger_penalty"]
+                val += bonus
+            elif n <= self.cfg["danger_cards"]:
+                bonus = 0.45 * self.cfg["eval_team_danger_bonus"] if self.same_team(p, self.position) else -0.45 * self.cfg["eval_enemy_danger_penalty"]
+                val += bonus
+
+        # Initiative / last control.
+        if self.same_team(sim.current_player, self.position) and sim.last_move == "":
+            val += self.cfg["eval_initiative_bonus"]
+        if sim.last_pid is not None and self.same_team(sim.last_pid, self.position):
+            val += self.cfg["eval_last_pid_bonus"]
+
+        # Team's bombs/control cards.
+        for p in ALL_POSITIONS:
+            sign = 1.0 if self.same_team(p, self.position) else -1.0
+            val += sign * self.cfg["eval_bomb_bonus"] * self.count_bombs(hands[p])
+            val += sign * self.cfg["eval_control_bonus"] * self.control_count(hands[p])
+
+        return val
+
+    # ============================================================
+    # Simulation mechanics
+    # ============================================================
+
+    def build_initial_sim_state(self, root_state, hands):
+        last_move = root_state["last_move"]
+        last_pid = self.pid_to_position(root_state.get("last_pid"))
+        if root_state["leading_round"]:
+            last_move = ""
+            last_pid = None
+            passes = 0
+        else:
+            passes = self.initial_pass_count(root_state)
+        return SimState(
+            hands_tuple=self.hands_to_tuple(hands),
+            current_player=self.position,
+            last_move=last_move,
+            last_pid=last_pid,
+            passes_after_last=passes,
+        )
+
+    def initial_pass_count(self, root_state):
+        last_two = root_state.get("last_two_moves", ["", ""])
+        # If immediately previous player passed but the round is not leading,
+        # then one pass has happened after the last non-pass move.
+        if len(last_two) >= 2 and last_two[1] == "" and last_two[0] != "":
+            return 1
+        return 0
+
+    def apply_action(self, sim, action_str):
+        hands = self.tuple_to_hands(sim.hands_tuple)
+        player = sim.current_player
+        next_player = self.next_player(player)
+
+        if action_str == "":
+            passes = sim.passes_after_last + 1
+            if passes >= 2:
+                # After two passes, the last non-pass player leads again.
+                return SimState(
+                    hands_tuple=sim.hands_tuple,
+                    current_player=next_player,
+                    last_move="",
+                    last_pid=None,
+                    passes_after_last=0,
+                )
+            return SimState(
+                hands_tuple=sim.hands_tuple,
+                current_player=next_player,
+                last_move=sim.last_move,
+                last_pid=sim.last_pid,
+                passes_after_last=passes,
+            )
+
+        hands[player] = self.remove_action_from_hand(hands[player], action_str)
+        return SimState(
+            hands_tuple=self.hands_to_tuple(hands),
+            current_player=next_player,
+            last_move=action_str,
+            last_pid=player,
+            passes_after_last=0,
+        )
+
+    def can_apply_action(self, sim, player, action_str):
+        hands = self.tuple_to_hands(sim.hands_tuple)
+        if action_str == "":
+            return sim.last_move != ""
+        if not self.can_remove(hands[player], action_str):
+            return False
+        if sim.last_move == "":
+            return True
+        return self.can_beat(action_str, sim.last_move)
+
+    def legal_actions_for_sim(self, sim):
+        hands = self.tuple_to_hands(sim.hands_tuple)
+        hand = hands[sim.current_player]
+        if not hand:
+            return []
+
+        all_actions = self.generate_actions_from_hand(hand)
+        if sim.last_move == "":
+            return all_actions
+
+        legal = [""]  # pass
+        for a in all_actions:
+            if self.can_beat(a, sim.last_move):
+                legal.append(a)
+        return legal
+
+    def next_player(self, p):
+        return ALL_POSITIONS[(POS_INDEX[p] + 1) % 3]
+
+    def hands_to_tuple(self, hands):
+        return tuple((p, self.sort_card_str(hands.get(p, ""))) for p in ALL_POSITIONS)
+
+    def tuple_to_hands(self, hands_tuple):
+        return {p: h for p, h in hands_tuple}
+
+    # ============================================================
+    # Candidate pruning / policy heuristics
+    # ============================================================
+
+    def prune_root_actions(self, legal_actions, state, belief):
+        pass_legal = [] in legal_actions
+        non_pass = [a for a in legal_actions if a != []]
+
+        if not non_pass:
+            return [[]] if pass_legal else legal_actions[:]
+
+        # If teammate is almost done, pass is a very strong candidate.
+        if (
+            not state["leading_round"]
+            and pass_legal
+            and self.is_teammate_last_player(state)
+            and state["teammate_cards"] is not None
+            and state["teammate_cards"] <= self.cfg["teammate_release_cards"]
+        ):
+            return [[]]
+
+        scored = []
+        for a in legal_actions:
+            if a == [] and state["leading_round"]:
+                continue
+            scored.append((self.root_action_policy_score(a, state, belief), a))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        k = self.cfg["root_topk_leading"] if state["leading_round"] else self.cfg["root_topk_following"]
+
+        chosen = [a for _, a in scored[:k]]
+
+        # In dangerous enemy positions, ensure non-pass responses are considered.
+        if not state["leading_round"] and self.is_enemy_last_player(state) and state["dangerous"]:
+            best_nonpass = [a for _, a in scored if a != []][:k]
+            chosen = list(dict.fromkeys(best_nonpass + chosen))[:max(k, len(best_nonpass))]
+
+        # Always include direct finish actions.
+        for a in non_pass:
+            if len(self.env_cards_to_real_str(a)) == state["my_count"] and a not in chosen:
+                chosen.insert(0, a)
+
+        return chosen if chosen else [self.greedy_fallback_action(legal_actions, state, belief)]
+
+    def prune_sim_actions(self, actions, sim, root_team_node):
+        scored = [(self.sim_action_policy_score(a, sim, root_team_node), a) for a in actions]
+        scored.sort(key=lambda x: x[0], reverse=True)
+
+        if sim.last_move == "":
+            k = self.cfg["sim_topk_leading"]
+        else:
+            k = self.cfg["sim_topk_following"]
+
+        return [a for _, a in scored[:k]]
+
+    def root_action_policy_score(self, action, state, belief):
+        if action == []:
+            if state["leading_round"]:
+                return -1e9
+            score = self.cfg["follow_pass_base"]
+            if self.is_teammate_last_player(state):
+                score += self.cfg["follow_teammate_pass_bonus"]
+            if self.is_enemy_last_player(state):
+                score -= self.cfg["root_pass_enemy_penalty"] * -0.2  # convert negative penalty to score drop below
+                score -= 25.0
+                if state["dangerous"]:
+                    score -= 120.0
+            return score
+
+        hand = state["my_hand"]
+        a_str = self.env_cards_to_real_str(action)
+        if not a_str or not self.can_remove(hand, a_str):
+            return -1e9
+
+        a_type, _ = self.get_card_type(a_str)
+        if state["leading_round"]:
+            return self.leading_action_score(a_str, hand, belief)
+
+        # Following score: cheapest beating action is usually good.
+        score = -self.action_cost(a_str, state)
+        last_type, _ = self.get_card_type(state["last_move"])
+        if self.normalize_type(a_type) == self.normalize_type(last_type):
+            score += self.cfg["follow_same_type_bonus"]
+        if self.is_enemy_last_player(state):
+            score += self.cfg["follow_enemy_bonus"]
+            if state["dangerous"]:
+                score += self.cfg["follow_enemy_danger_bonus"]
+        if self.is_teammate_last_player(state):
+            score -= self.cfg["follow_beat_teammate_penalty"]
+        if self.is_bomb_or_rocket(a_type) and not state["dangerous"]:
+            score -= 60.0
+        return score
+
+    def sim_action_policy_score(self, action_str, sim, root_team_node):
+        hands = self.tuple_to_hands(sim.hands_tuple)
+        player = sim.current_player
+        hand = hands[player]
+
+        if action_str == "":
+            # For the side to move, passing teammate/self is sometimes okay;
+            # enemy tends to pass if response is costly.
+            if sim.last_pid is not None and self.same_team(player, sim.last_pid):
+                return 80.0
+            return -5.0
+
+        if sim.last_move == "":
+            # Leading action.
+            return self.leading_action_score(action_str, hand, belief=None)
+
+        # Following action.
+        a_type, _ = self.get_card_type(action_str)
+        last_type, _ = self.get_card_type(sim.last_move)
+        score = -self.action_cost(action_str, {"dangerous": self.player_is_dangerous_enemy(sim, player)})
+        if self.normalize_type(a_type) == self.normalize_type(last_type):
+            score += self.cfg["follow_same_type_bonus"]
+        if self.is_bomb_or_rocket(a_type):
+            # Bomb if enemy/root team is dangerous; otherwise preserve it.
+            if self.any_enemy_of_player_dangerous(sim, player):
+                score += 50.0
+            else:
+                score -= 60.0
+        return score
+
+    def leading_action_score(self, action_str, hand, belief=None):
+        next_hand = self.remove_action_from_hand(hand, action_str)
+        current_bad = self.hand_badness(hand)
+        next_bad = self.hand_badness(next_hand)
+        a_type, _ = self.get_card_type(action_str)
+        type_str = str(a_type).lower()
+        counts = Counter(action_str)
+
+        score = 0.0
+        score += self.cfg["lead_hand_improve_weight"] * (current_bad - next_bad)
+        score += self.cfg["lead_len_weight"] * len(action_str)
+
+        if action_str and self.min_card(hand) in action_str:
+            score += self.cfg["lead_min_card_bonus"]
+
+        if self.is_chain_type(type_str):
+            score += self.cfg["lead_chain_bonus"] + self.cfg["lead_chain_len_bonus"] * len(action_str)
+        if counts and (max(counts.values()) == 3 or "trio" in type_str or "three" in type_str):
+            score += self.cfg["lead_trio_bonus"]
+        if len(action_str) == 2 and counts and max(counts.values()) == 2:
+            score += self.cfg["lead_pair_bonus"]
+
+        if len(action_str) == 1:
+            score -= self.cfg["lead_single_rank_penalty"] * self.main_rank_value(action_str)
+
+        if self.is_bomb_or_rocket(a_type) and next_hand != "":
+            score -= self.cfg["lead_bomb_penalty"]
+
+        score -= self.cfg["lead_control_cost_weight"] * self.control_cost(action_str, {"dangerous": False})
+
+        if belief is not None and next_hand != "":
+            score -= 3.0 * self.estimate_beaten_risk(action_str, a_type, belief)
+        return score
+
+    def greedy_fallback_action(self, legal_actions, state, belief):
+        pass_legal = [] in legal_actions
+        non_pass = [a for a in legal_actions if a != []]
+        if not non_pass:
+            return [] if pass_legal else random.choice(legal_actions)
+
+        finish = [a for a in non_pass if len(self.env_cards_to_real_str(a)) == state["my_count"]]
+        if finish:
+            return self.choose_lowest_cost_action(finish, state)
+
+        if state["leading_round"]:
+            scored = [(self.root_action_policy_score(a, state, belief), a) for a in non_pass]
+            scored.sort(key=lambda x: x[0], reverse=True)
+            best_score = scored[0][0]
+            best = [a for s, a in scored if s == best_score]
+            return self.choose_lowest_cost_action(best, state)
+
+        if self.is_teammate_last_player(state) and pass_legal:
+            return []
+
+        non_bombs = []
+        bombs = []
+        for a in non_pass:
+            a_str = self.env_cards_to_real_str(a)
+            a_type, _ = self.get_card_type(a_str)
+            if self.is_bomb_or_rocket(a_type):
+                bombs.append(a)
+            else:
+                non_bombs.append(a)
+
+        if self.is_enemy_last_player(state):
+            if non_bombs:
+                return self.choose_lowest_cost_action(non_bombs, state)
+            if bombs and (state["dangerous"] or not pass_legal):
+                return self.choose_lowest_cost_action(bombs, state)
+
+        return [] if pass_legal else self.choose_lowest_cost_action(non_pass, state)
+
+    # ============================================================
+    # Belief sampling
+    # ============================================================
+
+    def sample_determinizations(self, infoset, state, n):
+        unknown_counter = self.get_unknown_cards(infoset, state["my_hand"])
+        unknown_cards = []
+        for c in CARD_ORDER:
+            unknown_cards.extend([c] * max(0, unknown_counter[c]))
+
+        num_left = state["num_cards_left"]
+        targets = {}
+        for p in ALL_POSITIONS:
+            if p == self.position:
+                continue
+            targets[p] = int(num_left.get(p, 0))
+
+        if sum(targets.values()) <= 0:
+            # Fallback: split unknown cards among the two hidden players.
+            hidden = [p for p in ALL_POSITIONS if p != self.position]
+            half = len(unknown_cards) // len(hidden) if hidden else 0
+            for i, p in enumerate(hidden):
+                if i == len(hidden) - 1:
+                    targets[p] = len(unknown_cards) - half * i
+                else:
+                    targets[p] = half
+
+        total_need = sum(targets.values())
+        if total_need > len(unknown_cards):
+            # Clip targets if the infoset accounting is inconsistent.
+            overflow = total_need - len(unknown_cards)
+            for p in sorted(targets, key=lambda x: targets[x], reverse=True):
+                take = min(overflow, targets[p])
+                targets[p] -= take
+                overflow -= take
+                if overflow <= 0:
                     break
-                trailing += 1
-            if trailing >= 2:
-                self.lastValidCombo = CardCombo()
-                self.lastValidPlayer = self.myPosition
 
-    def get_num_cards_left(self, infoset) -> List[int]:
-        default = [20, 17, 17]
-        hand_len = len(getattr(infoset, "player_hand_cards", []))
-        default[self.myPosition] = hand_len
+        samples = []
+        for _ in range(n):
+            cards = unknown_cards[:]
+            self.rng.shuffle(cards)
+
+            hands = {p: "" for p in ALL_POSITIONS}
+            hands[self.position] = state["my_hand"]
+
+            idx = 0
+            for p in ALL_POSITIONS:
+                if p == self.position:
+                    continue
+                cnt = targets.get(p, 0)
+                hands[p] = self.sort_card_str("".join(cards[idx : idx + cnt]))
+                idx += cnt
+
+            samples.append(hands)
+        return samples
+
+    def infer_belief(self, infoset, state):
+        unknown_counter = self.get_unknown_cards(infoset, state["my_hand"])
+        return {
+            "unknown_counter": unknown_counter,
+            "bomb_prob": self.estimate_bomb_prob(unknown_counter),
+            "rocket_prob": self.estimate_rocket_prob(unknown_counter),
+        }
+
+    def get_unknown_cards(self, infoset, my_hand):
+        deck = Counter()
+        for card in CARD_ORDER:
+            deck[card] = 1 if card in ["B", "R"] else 4
+
+        for c in my_hand:
+            deck[c] -= 1
+
+        played = self.extract_played_cards(infoset)
+        for c in played:
+            deck[c] -= 1
+
+        for c in list(deck.keys()):
+            if deck[c] < 0:
+                deck[c] = 0
+        return deck
+
+    def extract_played_cards(self, infoset):
+        played = []
+
+        seq = getattr(infoset, "card_play_action_seq", None)
+        if seq is not None:
+            for action in seq:
+                played.extend(self.env_cards_to_real_list(action))
+            return played
+
+        raw = getattr(infoset, "played_cards", None)
+        if raw is not None:
+            if isinstance(raw, dict):
+                for cards in raw.values():
+                    played.extend(self.env_cards_to_real_list(cards))
+            elif isinstance(raw, list):
+                for item in raw:
+                    if isinstance(item, list):
+                        played.extend(self.env_cards_to_real_list(item))
+                    else:
+                        played.extend(self.env_cards_to_real_list([item]))
+            return played
+
+        last_two = getattr(infoset, "last_two_moves", [[], []])
+        for move in last_two:
+            played.extend(self.env_cards_to_real_list(move))
+        return played
+
+    def estimate_rocket_prob(self, unknown_counter):
+        if unknown_counter["B"] > 0 and unknown_counter["R"] > 0:
+            return self.cfg["rocket_prob"]
+        return 0.0
+
+    def estimate_bomb_prob(self, unknown_counter):
+        possible = 0
+        for card in CARD_ORDER:
+            if card in ["B", "R"]:
+                continue
+            if unknown_counter[card] >= 4:
+                possible += 1
+        return min(self.cfg["bomb_prob_cap"], possible * self.cfg["bomb_prob_per_possible"])
+
+    # ============================================================
+    # State extraction from infoset
+    # ============================================================
+
+    def extract_state(self, infoset):
+        my_hand = self.env_cards_to_real_str(getattr(infoset, "player_hand_cards", []))
+        last_move = self.env_cards_to_real_str(getattr(infoset, "last_move", []))
+        last_two_moves = self.get_last_two_moves(infoset)
+        last_pid = getattr(infoset, "last_pid", None)
+        leading_round = self.is_leading_round(last_move, last_two_moves)
+        num_cards_left = self.get_num_cards_left(infoset)
+
+        enemy_positions = self.get_enemy_positions()
+        teammate_position = self.get_teammate_position()
+
+        enemy_counts = [num_cards_left[p] for p in enemy_positions if p in num_cards_left]
+        enemy_min_cards = min(enemy_counts) if enemy_counts else 17
+
+        teammate_cards = None
+        if teammate_position is not None and teammate_position in num_cards_left:
+            teammate_cards = num_cards_left[teammate_position]
+
+        return {
+            "my_hand": my_hand,
+            "my_count": len(my_hand),
+            "last_move": last_move,
+            "last_two_moves": last_two_moves,
+            "last_pid": last_pid,
+            "leading_round": leading_round,
+            "num_cards_left": num_cards_left,
+            "enemy_positions": enemy_positions,
+            "teammate_position": teammate_position,
+            "enemy_min_cards": enemy_min_cards,
+            "teammate_cards": teammate_cards,
+            "dangerous": enemy_min_cards <= self.cfg["danger_cards"],
+            "very_dangerous": enemy_min_cards <= self.cfg["very_danger_cards"],
+            "is_landlord": self.position == "landlord",
+        }
+
+    def get_last_two_moves(self, infoset):
+        raw = getattr(infoset, "last_two_moves", [[], []])
+        result = []
+        for move in raw:
+            result.append(self.env_cards_to_real_str(move))
+        while len(result) < 2:
+            result.append("")
+        return result[:2]
+
+    def is_leading_round(self, last_move, last_two_moves):
+        return last_two_moves[0] == "" and last_two_moves[1] == ""
+
+    def get_num_cards_left(self, infoset):
         for attr in ["num_cards_left", "num_cards_left_dict", "player_num_cards_left"]:
             raw = getattr(infoset, attr, None)
             if raw is None:
                 continue
             if isinstance(raw, dict):
-                out = default[:]
-                for k, v in raw.items():
-                    if isinstance(k, str) and k in POS_INDEX:
-                        out[POS_INDEX[k]] = int(v)
-                    else:
-                        try:
-                            out[int(k)] = int(v)
-                        except Exception:
-                            pass
-                return out
-            if isinstance(raw, (list, tuple)) and len(raw) >= 3:
-                return [int(raw[0]), int(raw[1]), int(raw[2])]
-        return default
+                return dict(raw)
+            if isinstance(raw, (list, tuple)):
+                result = {}
+                for i, p in enumerate(ALL_POSITIONS):
+                    if i < len(raw):
+                        result[p] = raw[i]
+                return result
+        return {}
 
-    # ---------------- original action generation ----------------
-    def getActions(self, hand: CardCombinations, lastValidCombo: CardCombo) -> List[CardCombo]:
-        actions: List[CardCombo] = []
-        if lastValidCombo.comboType != CardComboType.PASS_:
-            actions.append(CardCombo())
+    # ============================================================
+    # Action generation and comparison
+    # ============================================================
 
-        t = lastValidCombo.comboType
-        if t == CardComboType.INVALID:
-            return actions
-        if t == CardComboType.ROCKET:
-            return actions
-        if t == CardComboType.BOMB:
-            hand.getAllRocket(); actions.extend(hand.rocket)
-            hand.getAllBomb()
-            actions.extend([bomb for bomb in hand.bomb if bomb.comboLevel > lastValidCombo.comboLevel])
-            return actions
-        if t == CardComboType.PASS_:
-            hand.getAllCombos()
-            actions.extend(hand.single)
-            actions.extend(hand.pair)
-            for length in range(5, 13): actions.extend(hand.straight[length])
-            for length in range(3, 11): actions.extend(hand.straight2[length])
-            actions.extend(hand.triplet)
-            actions.extend(hand.triplet1)
-            actions.extend(hand.triplet2)
-            actions.extend(hand.bomb)
-            actions.extend(hand.quadruple2)
-            actions.extend(hand.quadruple4)
-            for length in range(2, 7): actions.extend(hand.plane[length])
-            for length in range(2, 6): actions.extend(hand.plane1[length])
-            for length in range(2, 5): actions.extend(hand.plane2[length])
-            actions.extend(hand.sshuttle)
-            actions.extend(hand.sshuttle2)
-            actions.extend(hand.sshuttle4)
-            actions.extend(hand.rocket)
-            return actions
+    def generate_actions_from_hand(self, hand):
+        hand = self.sort_card_str(hand)
+        if hand in self.action_cache:
+            return self.action_cache[hand]
 
-        hand.getAllRocket(); actions.extend(hand.rocket)
-        hand.getAllBomb(); actions.extend(hand.bomb)
+        counts = Counter(hand)
+        actions = set()
 
-        if t == CardComboType.SINGLE:
-            hand.getAllSingle()
-            actions.extend([x for x in hand.single if x.comboLevel > lastValidCombo.comboLevel])
-        elif t == CardComboType.PAIR:
-            hand.getAllPair()
-            actions.extend([x for x in hand.pair if x.comboLevel > lastValidCombo.comboLevel])
-        elif t == CardComboType.STRAIGHT:
-            length = len(lastValidCombo.cards)
-            hand.getAllStraight()
-            for L in range(5, 13):
-                actions.extend([x for x in hand.straight[L] if len(x.cards) == length and x.comboLevel > lastValidCombo.comboLevel])
-        elif t == CardComboType.STRAIGHT2:
-            length = len(lastValidCombo.cards)
-            hand.getAllStraight2()
-            for L in range(3, 11):
-                actions.extend([x for x in hand.straight2[L] if len(x.cards) == length and x.comboLevel > lastValidCombo.comboLevel])
-        elif t == CardComboType.TRIPLET:
-            hand.getAllTriplet()
-            actions.extend([x for x in hand.triplet if x.comboLevel > lastValidCombo.comboLevel])
-        elif t == CardComboType.TRIPLET1:
-            hand.getAllTriplet1()
-            actions.extend([x for x in hand.triplet1 if x.comboLevel > lastValidCombo.comboLevel])
-        elif t == CardComboType.TRIPLET2:
-            hand.getAllTriplet2()
-            actions.extend([x for x in hand.triplet2 if x.comboLevel > lastValidCombo.comboLevel])
-        elif t == CardComboType.QUADRUPLE2:
-            hand.getAllQuadruple2()
-            actions.extend([x for x in hand.quadruple2 if x.comboLevel > lastValidCombo.comboLevel])
-        elif t == CardComboType.QUADRUPLE4:
-            hand.getAllQuadruple4()
-            actions.extend([x for x in hand.quadruple4 if x.comboLevel > lastValidCombo.comboLevel])
-        elif t == CardComboType.PLANE:
-            length = len(lastValidCombo.cards)
-            hand.getAllPlane()
-            for L in range(2, 7):
-                actions.extend([x for x in hand.plane[L] if len(x.cards) == length and x.comboLevel > lastValidCombo.comboLevel])
-        elif t == CardComboType.PLANE1:
-            length = len(lastValidCombo.cards)
-            hand.getAllPlane1()
-            for L in range(2, 6):
-                actions.extend([x for x in hand.plane1[L] if len(x.cards) == length and x.comboLevel > lastValidCombo.comboLevel])
-        elif t == CardComboType.PLANE2:
-            length = len(lastValidCombo.cards)
-            hand.getAllPlane2()
-            for L in range(2, 5):
-                actions.extend([x for x in hand.plane2[L] if len(x.cards) == length and x.comboLevel > lastValidCombo.comboLevel])
-        elif t == CardComboType.SSHUTTLE:
-            length = len(lastValidCombo.cards)
-            hand.getAllSshuttle()
-            actions.extend([x for x in hand.sshuttle if len(x.cards) == length and x.comboLevel > lastValidCombo.comboLevel])
-        elif t == CardComboType.SSHUTTLE2:
-            length = len(lastValidCombo.cards)
-            hand.getAllSshuttle2()
-            actions.extend([x for x in hand.sshuttle2 if len(x.cards) == length and x.comboLevel > lastValidCombo.comboLevel])
-        elif t == CardComboType.SSHUTTLE4:
-            length = len(lastValidCombo.cards)
-            hand.getAllSshuttle4()
-            actions.extend([x for x in hand.sshuttle4 if len(x.cards) == length and x.comboLevel > lastValidCombo.comboLevel])
+        for c in CARD_ORDER:
+            cnt = counts.get(c, 0)
+            if cnt >= 1:
+                actions.add(c)
+            if cnt >= 2:
+                actions.add(c * 2)
+            if cnt >= 3:
+                actions.add(c * 3)
+            if cnt >= 4 and c not in ["B", "R"]:
+                actions.add(c * 4)
 
-        # Remove duplicate concrete actions while preserving order.
-        seen = set(); unique = []
+        if counts.get("B", 0) >= 1 and counts.get("R", 0) >= 1:
+            actions.add("BR")
+
+        trio_cards = [c for c in NORMAL_CHAIN_ORDER + ["2"] if counts.get(c, 0) >= 3]
+        solo_cards = [c for c in CARD_ORDER if counts.get(c, 0) >= 1]
+        pair_cards = [c for c in NORMAL_CHAIN_ORDER + ["2"] if counts.get(c, 0) >= 2]
+
+        for t in trio_cards:
+            base = t * 3
+            for s in solo_cards:
+                if s != t:
+                    actions.add(base + s)
+            for p in pair_cards:
+                if p != t:
+                    actions.add(base + p * 2)
+
+        bomb_cards = [c for c in NORMAL_CHAIN_ORDER + ["2"] if counts.get(c, 0) >= 4]
+        for b in bomb_cards:
+            base = b * 4
+            sol = [c for c in solo_cards if c != b]
+            pairs = [c for c in pair_cards if c != b]
+            for wings in list(combinations(sol, 2))[: self.cfg["max_wing_combinations"]]:
+                actions.add(base + "".join(wings))
+            for wings in list(combinations(pairs, 2))[: self.cfg["max_wing_combinations"]]:
+                actions.add(base + "".join(w * 2 for w in wings))
+
+        self._add_chains(actions, counts, need=1, min_len=5)
+        self._add_chains(actions, counts, need=2, min_len=3)
+        self._add_chains(actions, counts, need=3, min_len=2)
+        self._add_limited_planes_with_wings(actions, counts)
+
+        valid = []
         for a in actions:
-            if a.key() not in seen:
-                seen.add(a.key()); unique.append(a)
-        return unique
-
-    # ---------------- original utility/action policy ----------------
-    def utility(self, hand: CardCombinations, alpha: int = 10) -> int:
-        return self.getUtility(hand, 0, alpha)
-
-    def getUtility(self, hand: CardCombinations, type_: int, alpha: int) -> int:
-        if type_ == 0:
-            hand.getAllRocket()
-            if not hand.rocket:
-                return self.getUtility(hand, 1, alpha)
-            myRocket = hand.rocket[0]
-            hand.erase(myRocket.cards)
-            utility1 = self.getUtility(hand, 1, alpha) + 15
-            hand.insert(myRocket.cards)
-            utility2 = self.getUtility(hand, 1, alpha)
-            return max(utility1, utility2)
-
-        if type_ == 1:
-            hand.getAllBomb()
-            if not hand.bomb:
-                return self.getUtility(hand, 2, alpha)
-            biggestBomb = hand.bomb[0]
-            hand.erase(biggestBomb.cards)
-            utility1 = self.getUtility(hand, 1, alpha) + biggestBomb.comboLevel
-            hand.insert(biggestBomb.cards)
-            utility2 = self.getUtility(hand, 2, alpha)
-            return max(utility1, utility2)
-
-        if type_ == 2:
-            hand.getAllPlane(); hand.getAllPlane1(); hand.getAllPlane2()
-            if not hand.plane[2]:
-                return self.getUtility(hand, 3, alpha)
-            maxutility = -233333
-            for L in range(2, 7):
-                for planei in list(hand.plane[L]):
-                    hand.erase(planei.cards)
-                    utility1 = self.getUtility(hand, 2, alpha) + planei.comboLevel - L + 1 - alpha
-                    if len(hand.plane[L]) > 1: utility1 += 2
-                    maxutility = max(maxutility, utility1)
-                    hand.insert(planei.cards)
-                if L <= 5:
-                    for plane1i in list(hand.plane1[L]):
-                        hand.erase(plane1i.cards)
-                        utility1 = self.getUtility(hand, 2, alpha) + plane1i.comboLevel - L + 1 - alpha
-                        if len(hand.plane1[L]) > 1: utility1 += 2
-                        maxutility = max(maxutility, utility1)
-                        hand.insert(plane1i.cards)
-                if L <= 4:
-                    for plane2i in list(hand.plane2[L]):
-                        hand.erase(plane2i.cards)
-                        utility1 = self.getUtility(hand, 2, alpha) + plane2i.comboLevel - L + 1 - alpha
-                        if len(hand.plane2[L]) > 1: utility1 += 2
-                        maxutility = max(maxutility, utility1)
-                        hand.insert(plane2i.cards)
-            utility2 = self.getUtility(hand, 3, alpha)
-            return max(maxutility, utility2)
-
-        if type_ == 3:
-            hand.getAllStraight2()
-            if not hand.straight2[3]:
-                return self.getUtility(hand, 4, alpha)
-            maxutility = -233333
-            for L in range(3, 11):
-                for straight2i in list(hand.straight2[L]):
-                    hand.erase(straight2i.cards)
-                    utility1 = self.getUtility(hand, 3, alpha) + straight2i.comboLevel - L + 1 - alpha
-                    if len(hand.straight2[L]) > 1: utility1 += 2
-                    if straight2i.comboLevel == 11: utility1 += 1
-                    maxutility = max(maxutility, utility1)
-                    hand.insert(straight2i.cards)
-            utility2 = self.getUtility(hand, 4, alpha)
-            return max(maxutility, utility2)
-
-        if type_ == 4:
-            hand.getAllStraight()
-            if not hand.straight[5]:
-                return self.getUtility(hand, 5, alpha)
-            maxutility = -233333
-            for L in range(5, 13):
-                for straighti in list(hand.straight[L]):
-                    hand.erase(straighti.cards)
-                    utility1 = self.getUtility(hand, 4, alpha) + straighti.comboLevel - L + 1 - alpha
-                    if len(hand.straight[L]) > 1: utility1 += 2
-                    if straighti.comboLevel == 11: utility1 += 1
-                    maxutility = max(maxutility, utility1)
-                    hand.insert(straighti.cards)
-            utility2 = self.getUtility(hand, 5, alpha)
-            return max(maxutility, utility2)
-
-        if type_ == 5:
-            hand.getAllSingle()
-            utility1 = 0
-            for singlei in hand.single:
-                lv = singlei.comboLevel
-                utility1 += lv + hand.packs[lv]["count"] - alpha
-                if lv >= 11:
-                    utility1 += hand.packs[lv]["count"] * hand.packs[lv]["count"] * (lv - 10)
-            return utility1
-
-        return 233333333
-
-    def _findBestAction(self, hand: CardCombinations, lastValidCombo: CardCombo, alpha: int = 19, beta: int = 6) -> CardCombo:
-        actions = self.getActions(hand, lastValidCombo)
-        if not actions:
-            return CardCombo()
-        bestAction = CardCombo()
-        bestMeasure = 0 if len(lastValidCombo.cards) else -233333
-        if not len(lastValidCombo.cards):
-            alpha += 3
-        originalUtility = self.utility(hand, alpha)
-        for action in actions:
-            hand.erase(action.cards)
-            if not hand.getLength():
-                hand.insert(action.cards)
-                return action
-            tempMeasure = 10 * (self.utility(hand, alpha) - originalUtility) + beta * action.comboLevel
-            if action.comboType in (CardComboType.BOMB, CardComboType.ROCKET):
-                tempMeasure += beta * 6
-            elif action.comboLevel >= 11:
-                tempMeasure += beta * (action.comboLevel - 10 + 3 * (1 if action.comboLevel >= 13 else 0))
-            hand.insert(action.cards)
-            if tempMeasure > bestMeasure:
-                bestMeasure = tempMeasure
-                bestAction = action
-
-        if (self.myPosition == (self.landlordPosition + 1) % 3
-                and self.cardRemaining[(self.myPosition + 1) % 3] == 1
-                and not len(lastValidCombo.cards)):
-            hand.getAllSingle()
-            if hand.single:
-                return CardCombo(hand.single[0].cards, CardComboType.SINGLE)
-        return bestAction
-
-    def findBestAction(self, hand: CardCombinations, lastValidCombo: CardCombo, position: int, landlordPosition: int) -> CardCombo:
-        alpha, beta = 19, 6
-        if position == (landlordPosition + 2) % 3 and self.lastValidPlayer == landlordPosition:
-            beta += 5
-        if position == (landlordPosition + 2) % 3 and self.lastValidPlayer == (landlordPosition + 1) % 3 and lastValidCombo.comboLevel >= 9:
-            beta -= lastValidCombo.comboLevel - 8
-        if position == (landlordPosition + 1) % 3 and self.lastValidPlayer == (landlordPosition + 2) % 3:
-            beta -= 5
-        return self._findBestAction(hand, lastValidCombo, alpha, beta)
-
-    def _findBestNActions(self, n_: int, hand: CardCombinations, lastValidCombo: CardCombo, alpha: int = 19, beta: int = 6) -> List[CardCombo]:
-        actions = self.getActions(hand, lastValidCombo)
-        n = min(n_, len(actions))
-        if n == 0:
-            return []
-        if not len(lastValidCombo.cards):
-            alpha += 3
-        originalUtility = self.utility(hand, alpha)
-        scored = []
-        for action in actions:
-            hand.erase(action.cards)
-            tempMeasure = 10 * (self.utility(hand, alpha) - originalUtility) + beta * action.comboLevel
-            if action.comboType in (CardComboType.BOMB, CardComboType.ROCKET):
-                tempMeasure += beta * 6
-            elif action.comboLevel >= 11:
-                tempMeasure += beta * (action.comboLevel - 9 + (1 if action.comboLevel >= 13 else 0))
-            hand.insert(action.cards)
-            scored.append((tempMeasure, action))
-        scored.sort(key=lambda x: (x[0], x[1].sort_key()), reverse=True)
-        return [a for _, a in scored[:n]]
-
-    def findBestNActions(self, n_: int, hand: CardCombinations, lastValidCombo: CardCombo, position: int, landlordPosition: int) -> List[CardCombo]:
-        alpha, beta = 19, 6
-        if position == landlordPosition:
-            enemyLeft = min(self.cardRemaining[(position + 1) % 3], self.cardRemaining[(position + 2) % 3])
-        else:
-            enemyLeft = self.cardRemaining[landlordPosition]
-        if enemyLeft <= 5:
-            beta += 6 - enemyLeft
-        if position == (landlordPosition + 2) % 3 and self.lastValidPlayer == landlordPosition:
-            beta += 5
-        if position == (landlordPosition + 2) % 3 and self.lastValidPlayer == (landlordPosition + 1) % 3 and lastValidCombo.comboLevel >= 9:
-            beta -= lastValidCombo.comboLevel - 8
-        if position == (landlordPosition + 1) % 3 and self.lastValidPlayer == (landlordPosition + 2) % 3:
-            beta -= 5
-        return self._findBestNActions(n_, hand, lastValidCombo, alpha, beta)
-
-    # ---------------- original Monte Carlo rollout ----------------
-    def prepareData(self):
-        self.myHand = CardCombinations(sorted(self.myCards))
-        self.remainingCards = set(range(54))
-        for c in self.myCards:
-            self.remainingCards.discard(c)
-        for i in range(3):
-            for vc in self.whatTheyPlayed[i]:
-                for v in vc:
-                    self.remainingCards.discard(v)
-        self.root = TreeNode(self.myPosition, [CardCombinations(), CardCombinations(), CardCombinations()])
-        self.root.hands[self.myPosition] = self.myHand.clone()
-        self.root.turn = self.myPosition
-        self.rootActions = self.findBestNActions(self.n_root_actions, self.myHand, self.lastValidCombo, self.myPosition, self.landlordPosition)
-        if not self.rootActions:
-            self.rootActions = [CardCombo()]
-        self.winningTimes = {a.key(): 0 for a in self.rootActions}
-        self.rootActionByKey = {a.key(): a for a in self.rootActions}
-        if len(self.whatTheyPlayed[self.landlordPosition]):
-            for vc in self.whatTheyPlayed[self.landlordPosition][1:]:
-                if len(vc):
-                    self.landlordHasNotPlayed = False
-
-    def determinization(self, nextPlayerRemainingCards: int):
-        a = list(self.remainingCards)
-        self.rng.shuffle(a)
-        next_cnt = max(0, min(int(nextPlayerRemainingCards), len(a)))
-        self.nextHand = CardCombinations(a[:next_cnt])
-        self.previousHand = CardCombinations(a[next_cnt:])
-        hands = [h.clone() for h in self.root.hands]
-        if self.myPosition == 0:
-            hands[1] = self.nextHand.clone(); hands[2] = self.previousHand.clone()
-        elif self.myPosition == 1:
-            hands[0] = self.previousHand.clone(); hands[2] = self.nextHand.clone()
-        elif self.myPosition == 2:
-            hands[0] = self.nextHand.clone(); hands[1] = self.previousHand.clone()
-        hands[self.myPosition] = self.myHand.clone()
-        self.root.hands = hands
-
-        self.sons = []
-        for action in self.rootActions:
-            root_hands = [h.clone() for h in self.root.hands]
-            root_hands[self.myPosition].erase(action.cards)
-            self.sons.append((action, TreeNode((self.myPosition + 1) % 3, root_hands)))
-
-    def MCTS(self, node: TreeNode, lastValidCombo_: CardCombo, lastValidPlayer_: int) -> int:
-        turn = node.turn
-        if not node.hands[(turn + 2) % 3].getLength():
-            winner = (turn + 2) % 3
-            if (winner == self.landlordPosition
-                    and node.hands[(self.landlordPosition + 1) % 3].getLength() == 17
-                    and node.hands[(self.landlordPosition + 2) % 3].getLength() == 17):
-                self.totalScore *= 2
-            elif winner != self.landlordPosition and self.landlordHasNotPlayed_:
-                self.totalScore *= 2
-            if winner == self.myPosition:
-                return self.totalScore
-            elif self.myPosition != self.landlordPosition and winner != self.landlordPosition:
-                return self.totalScore
-            return -self.totalScore
-
-        action = self.findBestAction(node.hands[turn], lastValidCombo_, turn, self.landlordPosition)
-        nextLastCombo = action
-        nextLastPlayer = turn
-        if turn == self.landlordPosition and len(action.cards):
-            self.landlordHasNotPlayed_ = False
-        if action.comboType == CardComboType.PASS_:
-            nextLastPlayer = lastValidPlayer_
-            if lastValidPlayer_ == (turn + 2) % 3:
-                nextLastCombo = lastValidCombo_
-        elif action.comboType in (CardComboType.BOMB, CardComboType.ROCKET):
-            self.totalScore *= 2
-
-        new_hands = [h.clone() for h in node.hands]
-        new_hands[turn].erase(action.cards)
-        newNode = TreeNode((turn + 1) % 3, new_hands)
-        return self.MCTS(newNode, nextLastCombo, nextLastPlayer)
-
-    def calculateScores(self):
-        deadline = self.startTime + self.time_limit_sec
-        while time.perf_counter() < deadline:
-            self.determinization(self.cardRemaining[(self.myPosition + 1) % 3])
-            for action, son in self.sons:
-                lastValidCombo_ = action
-                lastValidPlayer_ = self.myPosition
-                if action.comboType == CardComboType.PASS_:
-                    lastValidPlayer_ = self.lastValidPlayer
-                    if self.lastValidPlayer == (self.myPosition + 2) % 3:
-                        lastValidCombo_ = self.lastValidCombo
-                self.totalScore = 1
-                if lastValidCombo_.comboType in (CardComboType.BOMB, CardComboType.ROCKET):
-                    self.totalScore *= 2
-                self.landlordHasNotPlayed_ = self.landlordHasNotPlayed
-                if self.myPosition == self.landlordPosition and len(self.lastValidCombo.cards):
-                    self.landlordHasNotPlayed_ = False
-                self.winningTimes[action.key()] = self.winningTimes.get(action.key(), 0) + self.MCTS(son.clone(), lastValidCombo_, lastValidPlayer_)
-                self.stats["rollouts"] += 1
-                if time.perf_counter() >= deadline:
-                    break
-
-    def returnAction(self) -> CardCombo:
-        self.calculateScores()
-        if not self.rootActions:
-            return CardCombo()
-        bestKey = self.rootActions[0].key()
-        bestWinningTimes = -10**18
-        for key, score in self.winningTimes.items():
-            if score >= bestWinningTimes:
-                bestWinningTimes = score
-                bestKey = key
-        bestAction = self.rootActionByKey.get(bestKey, self.rootActions[0])
-
-        remaining = dict(self.winningTimes)
-        remaining.pop(bestKey, None)
-        if not remaining:
-            return bestAction
-        secondBestWinningTimes = max(remaining.values()) if remaining else -10**18
-        self.differenceBetweenFirstAndSecond = bestWinningTimes - secondBestWinningTimes
-        first_key = self.rootActions[0].key()
-        first_score = self.winningTimes.get(first_key, 0)
-        if bestWinningTimes - secondBestWinningTimes >= 40:
-            return bestAction
-        elif bestWinningTimes - first_score >= 50:
-            return bestAction
-        return self.rootActions[0]
-
-    # ---------------- local-interface helpers ----------------
-    def match_legal_action(self, action_env: List[int], legal_actions: List[List[int]]) -> Optional[List[int]]:
-        target = Counter(action_env)
-        for a in legal_actions:
-            if Counter(a) == target:
-                return a
-        return None
-
-    def choose_best_from_legal_actions(self, infoset, legal_actions) -> Optional[List[int]]:
-        # Re-score only RLCard legal actions with the same _findBestAction measure,
-        # but restricted to legal_actions. This is a safety wrapper for rank-only
-        # interfaces where concrete suit reconstruction may differ.
-        legal_nonempty = [a for a in legal_actions if a]
-        if not legal_nonempty and [] in legal_actions:
-            return []
-        hand = self.myHand.clone()
-        last = self.lastValidCombo
-        best = None
-        best_score = -10**18 if not len(last.cards) else 0
-        alpha, beta = 19, 6
-        if not len(last.cards): alpha += 3
-        original = self.utility(hand, alpha)
-        used_base = set(self.myCards)
-        for env_a in legal_actions:
-            concrete = env_action_to_concrete(env_a, set())
-            action = CardCombo(concrete)
-            if action.comboType == CardComboType.INVALID:
-                continue
-            # Need concrete cards actually from my hand for erase. Convert by levels from myCards.
-            try:
-                concrete_from_hand = self.concrete_action_from_my_hand(env_a)
-            except Exception:
-                continue
-            action = CardCombo(concrete_from_hand)
-            hand.erase(action.cards)
-            if not hand.getLength():
-                hand.insert(action.cards)
-                return env_a
-            score = 10 * (self.utility(hand, alpha) - original) + beta * action.comboLevel
-            if action.comboType in (CardComboType.BOMB, CardComboType.ROCKET):
-                score += beta * 6
-            elif action.comboLevel >= 11:
-                score += beta * (action.comboLevel - 10 + 3 * (1 if action.comboLevel >= 13 else 0))
-            hand.insert(action.cards)
-            if score > best_score:
-                best_score = score; best = env_a
-        return best
-
-    def concrete_action_from_my_hand(self, env_action: Iterable[int]) -> List[int]:
-        by_level = defaultdict(list)
-        for c in sorted(self.myCards):
-            by_level[card2level(c)].append(c)
-        out = []
-        for lv in env_action_to_levels(env_action):
-            if not by_level[lv]:
-                raise ValueError("missing card")
-            out.append(by_level[lv].pop(0))
-        return sorted(out)
-
-
-# Optional alias, if your evaluation script expects the same class name style.
-# Prefer importing HighRankMonteCarloAgent explicitly to avoid confusing it with
-# the original RLCard baseline.
-MonteCarloUtilityAgent = HighRankMonteCarloAgent
-
-
-# ---------------------------------------------------------------------------
-# Depth-controlled integration:
-#   depth == 1: exactly use the original HighRankMonteCarloAgent behavior.
-#   depth  > 1: run a shallow adversarial/team search; when the search reaches
-#               a leaf, evaluate that leaf by the original high-rank Monte Carlo
-#               rollout (MCTS method) from that leaf state.
-#
-# This preserves the high-rank bot as the depth-1 base case, while making deeper
-# settings a genuine adversarial search over explicit next actions.
-# ---------------------------------------------------------------------------
-
-class AdversarialSearchAgent(HighRankMonteCarloAgent):
-    """
-    High-rank Monte Carlo at depth=1; adversarial search with high-rank MCTS leaf
-    value at depth>1.
-
-    Public interface stays compatible with your existing config.py:
-        agent = AdversarialSearchAgent(position, arg=None)
-        agent.cfg["num_samples"] = ...
-        agent.cfg["search_depth"] = ...
-        action = agent.act(infoset)
-
-    Semantics:
-      - search_depth <= 1:
-            return super().act(infoset), i.e. the original HighRankMonteCarloAgent.
-      - search_depth > 1:
-            root actions are still high-rank top-N actions;
-            search explicitly expands top actions for self/teammate/enemy;
-            self/team nodes take max;
-            enemy nodes use min or softmin over child values;
-            depth-cutoff leaves are evaluated by the original MCTS rollout.
-    """
-
-    def __init__(self, position: str, arg=None, debug: bool = False, seed=None, **kwargs):
-        # Keep defaults modest for Windows multiprocessing. They can be changed
-        # through cfg after construction by your config.py.
-        time_limit_sec = kwargs.pop("time_limit_sec", 1.0)
-        n_root_actions = kwargs.pop("n_root_actions", 3)
-        super().__init__(
-            position=position,
-            debug=debug,
-            time_limit_sec=time_limit_sec,
-            n_root_actions=n_root_actions,
-            seed=seed,
-        )
-        self.name = "HighRankDepthMCTSLeafAdversarialAgent"
-        self.cfg = {
-            # Compatibility with the original adversarial_agent config hook.
-            "num_samples": 800,             # max determinizations; time budget usually binds first
-            "search_depth": 3,              # 1 = exact high-rank Monte Carlo
-            "time_budget_sec": time_limit_sec,
-            "n_root_actions": n_root_actions,
-
-            # Branching for depth > 1.
-            "self_topk_leading": 3,
-            "self_topk_following": 2,
-            "ally_topk_leading": 3,
-            "ally_topk_following": 2,
-            "enemy_topk_leading": 3,
-            "enemy_topk_following": 2,
-
-            # Enemy aggregation. "softmin" is adversarial but less brittle than pure min.
-            # Options: "softmin", "min", "policy_expectation".
-            "enemy_node_mode": "softmin",
-            "enemy_softmin_temp": 4.0,
-
-            # Root selection gate for depth > 1. This mirrors the high-rank bot's
-            # conservative returnAction rule: if search is not clearly better,
-            # return the first high-rank heuristic action.
-            "use_root_gate": True,
-            "accept_margin_vs_second": 40.0,
-            "accept_margin_vs_baseline": 50.0,
-
-            # Safety.
-            "max_leaf_rollouts_per_value": 1,
-        }
-        # Some external code may inspect these names.
-        self.stats.update({
-            "adversarial_nodes": 0,
-            "leaf_mcts_values": 0,
-            "root_search_samples": 0,
-            "depth1_base_calls": 0,
-        })
-
-    # ---------------- public API ----------------
-    def act(self, infoset):
-        self._sync_config_to_highrank_fields()
-        depth = int(self.cfg.get("search_depth", 1))
-
-        # Important: depth=1 must be exactly the translated high-rank Monte Carlo bot.
-        if depth <= 1:
-            self.stats["depth1_base_calls"] = self.stats.get("depth1_base_calls", 0) + 1
-            return super().act(infoset)
-
-        self.stats["acts"] += 1
-        try:
-            legal_actions = getattr(infoset, "legal_actions", [])
-            if not legal_actions:
-                return []
-            if len(legal_actions) == 1:
-                return legal_actions[0]
-
-            self.reset_runtime_state()
-            self._sync_config_to_highrank_fields()
-            self.read_infoset(infoset)
-            self.prepareData()
-
-            # Direct finish always dominates.
-            for a in legal_actions:
-                if a and len(a) == len(getattr(infoset, "player_hand_cards", [])):
-                    return a
-
-            # If high-rank preparation found no root action, fall back to legal heuristic.
-            if not self.rootActions:
-                fallback = self.choose_best_from_legal_actions(infoset, legal_actions)
-                return fallback if fallback is not None else random.choice(legal_actions)
-
-            best_combo = self.return_adversarial_depth_action(depth)
-            if best_combo is None:
-                best_combo = self.rootActions[0]
-
-            action_env = concrete_action_to_env(best_combo.cards)
-            matched = self.match_legal_action(action_env, legal_actions)
-            if matched is not None:
-                return matched
-
-            # If concrete suit reconstruction differs, safely re-score legal actions.
-            fallback = self.choose_best_from_legal_actions(infoset, legal_actions)
-            return fallback if fallback is not None else random.choice(legal_actions)
-
-        except Exception as e:
-            self.stats["fallbacks"] = self.stats.get("fallbacks", 0) + 1
-            self.last_error = repr(e)
-            legal_actions = getattr(infoset, "legal_actions", [])
-            return random.choice(legal_actions) if legal_actions else []
-
-    def _sync_config_to_highrank_fields(self):
-        if not hasattr(self, "cfg"):
-            return
-        # Your config.py may set cfg after construction. Sync before each act.
-        self.time_limit_sec = float(
-            self.cfg.get("time_budget_sec", self.cfg.get("time_limit_sec", self.time_limit_sec))
-        )
-        self.n_root_actions = int(self.cfg.get("n_root_actions", self.n_root_actions))
-
-    # ---------------- depth > 1 root evaluation ----------------
-    def return_adversarial_depth_action(self, depth: int) -> CardCombo:
-        deadline = self.startTime + self.time_limit_sec
-        scores = {a.key(): 0.0 for a in self.rootActions}
-        counts = {a.key(): 0 for a in self.rootActions}
-        self.rootActionByKey = {a.key(): a for a in self.rootActions}
-
-        max_samples = int(self.cfg.get("num_samples", 0))
-        samples_done = 0
-
-        while time.perf_counter() < deadline:
-            if max_samples > 0 and samples_done >= max_samples:
-                break
-            self.determinization(self.cardRemaining[(self.myPosition + 1) % 3])
-            samples_done += 1
-            self.stats["root_search_samples"] = self.stats.get("root_search_samples", 0) + 1
-
-            for action, son in self.sons:
-                if time.perf_counter() >= deadline:
-                    break
-                last_combo, last_player, total_score, landlord_flag = self._root_meta_after_action(action)
-                val = self._adversarial_value(
-                    son.clone(),
-                    last_combo,
-                    last_player,
-                    depth - 1,
-                    total_score,
-                    landlord_flag,
-                    deadline,
-                )
-                scores[action.key()] = scores.get(action.key(), 0.0) + val
-                counts[action.key()] = counts.get(action.key(), 0) + 1
-
-        # If time was too short, stay with the original high-rank first action.
-        if not any(counts.values()):
-            return self.rootActions[0]
-
-        # Average by actual visits so actions are comparable under time cutoff.
-        avg_scores = {}
-        for a in self.rootActions:
-            k = a.key()
-            avg_scores[k] = scores.get(k, 0.0) / max(1, counts.get(k, 0))
-            self.winningTimes[k] = scores.get(k, 0.0)  # for debug compatibility
-
-        best_key = max(avg_scores, key=lambda k: avg_scores[k])
-        best_action = self.rootActionByKey.get(best_key, self.rootActions[0])
-
-        if not self.cfg.get("use_root_gate", True):
-            return best_action
-
-        baseline_key = self.rootActions[0].key()
-        baseline_score = avg_scores.get(baseline_key, -10**18)
-        other_scores = [v for k, v in avg_scores.items() if k != best_key]
-        second_score = max(other_scores) if other_scores else -10**18
-
-        self.differenceBetweenFirstAndSecond = avg_scores[best_key] - second_score
-        if avg_scores[best_key] - second_score >= float(self.cfg.get("accept_margin_vs_second", 40.0)):
-            return best_action
-        if avg_scores[best_key] - baseline_score >= float(self.cfg.get("accept_margin_vs_baseline", 50.0)):
-            return best_action
-        return self.rootActions[0]
-
-    def _root_meta_after_action(self, action: CardCombo):
-        last_combo = action
-        last_player = self.myPosition
-        if action.comboType == CardComboType.PASS_:
-            last_player = self.lastValidPlayer
-            if self.lastValidPlayer == (self.myPosition + 2) % 3:
-                last_combo = self.lastValidCombo
-
-        total_score = 1
-        if last_combo.comboType in (CardComboType.BOMB, CardComboType.ROCKET):
-            total_score *= 2
-
-        landlord_flag = self.landlordHasNotPlayed
-        if self.myPosition == self.landlordPosition and len(self.lastValidCombo.cards):
-            landlord_flag = False
-        return last_combo, last_player, total_score, landlord_flag
-
-    # ---------------- recursive adversarial/team search ----------------
-    def _adversarial_value(
-        self,
-        node: TreeNode,
-        last_valid_combo: CardCombo,
-        last_valid_player: int,
-        depth: int,
-        total_score: int,
-        landlord_has_not_played: bool,
-        deadline: float,
-    ) -> float:
-        self.stats["adversarial_nodes"] = self.stats.get("adversarial_nodes", 0) + 1
-
-        winner = self._terminal_winner(node)
-        if winner is not None:
-            return float(self._terminal_score_from_winner(winner, node, total_score, landlord_has_not_played))
-
-        if depth <= 0 or time.perf_counter() >= deadline:
-            return float(self._leaf_mcts_value(node, last_valid_combo, last_valid_player, total_score, landlord_has_not_played))
-
-        turn = node.turn
-        actions = self._top_actions_for_search_node(node, last_valid_combo, last_valid_player, turn)
-        if not actions:
-            actions = [CardCombo()]
-
-        child_values = []
-        for action in actions:
-            if time.perf_counter() >= deadline:
-                break
-            next_node, next_combo, next_player, next_score, next_landlord_flag = self._advance_node(
-                node, action, last_valid_combo, last_valid_player, total_score, landlord_has_not_played
-            )
-            child_values.append(
-                self._adversarial_value(
-                    next_node,
-                    next_combo,
-                    next_player,
-                    depth - 1,
-                    next_score,
-                    next_landlord_flag,
-                    deadline,
-                )
-            )
-
-        if not child_values:
-            return float(self._leaf_mcts_value(node, last_valid_combo, last_valid_player, total_score, landlord_has_not_played))
-
-        if self._same_team_index(turn, self.myPosition):
-            return max(child_values)
-
-        mode = str(self.cfg.get("enemy_node_mode", "softmin")).lower()
-        if mode == "min":
-            return min(child_values)
-        if mode == "policy_expectation":
-            # This keeps only the high-rank top-action distribution implicit: equal
-            # average over already policy-pruned top actions.
-            return sum(child_values) / len(child_values)
-        return self._softmin(child_values, temp=float(self.cfg.get("enemy_softmin_temp", 4.0)))
-
-    def _top_actions_for_search_node(self, node: TreeNode, last_combo: CardCombo, last_player: int, turn: int):
-        old_remaining = self.cardRemaining[:]
-        old_last_valid_player = self.lastValidPlayer
-        try:
-            self.cardRemaining = [h.getLength() for h in node.hands]
-            self.lastValidPlayer = last_player
-            leading = (last_combo.comboType == CardComboType.PASS_ or len(last_combo.cards) == 0)
-            if self._same_team_index(turn, self.myPosition):
-                if turn == self.myPosition:
-                    k = self.cfg.get("self_topk_leading" if leading else "self_topk_following", 2)
-                else:
-                    k = self.cfg.get("ally_topk_leading" if leading else "ally_topk_following", 2)
+            a = self.sort_card_str(a)
+            if a and self.can_remove(hand, a):
+                valid.append(a)
+
+        valid = sorted(set(valid), key=lambda x: (-len(x), self.main_rank_value(x), x))
+        valid = valid[: self.cfg["max_generated_actions_per_state"]]
+        self.action_cache[hand] = valid
+        return valid
+
+    def _add_chains(self, actions, counts, need, min_len):
+        run = []
+        for c in NORMAL_CHAIN_ORDER:
+            if counts.get(c, 0) >= need:
+                run.append(c)
             else:
-                k = self.cfg.get("enemy_topk_leading" if leading else "enemy_topk_following", 2)
-            actions = self.findBestNActions(int(k), node.hands[turn], last_combo, turn, self.landlordPosition)
-            if not actions:
-                actions = self.getActions(node.hands[turn], last_combo)
-                actions = actions[: max(1, int(k))]
-            return actions
-        finally:
-            self.cardRemaining = old_remaining
-            self.lastValidPlayer = old_last_valid_player
+                self._emit_subchains(actions, run, need, min_len)
+                run = []
+        self._emit_subchains(actions, run, need, min_len)
 
-    def _advance_node(
-        self,
-        node: TreeNode,
-        action: CardCombo,
-        last_combo: CardCombo,
-        last_player: int,
-        total_score: int,
-        landlord_has_not_played: bool,
-    ):
-        turn = node.turn
-        next_combo = action
-        next_player = turn
-        next_score = total_score
-        next_landlord_flag = landlord_has_not_played
+    def _emit_subchains(self, actions, run, need, min_len):
+        if len(run) < min_len:
+            return
+        for L in range(min_len, len(run) + 1):
+            for i in range(0, len(run) - L + 1):
+                segment = run[i : i + L]
+                actions.add("".join(c * need for c in segment))
 
-        if turn == self.landlordPosition and len(action.cards):
-            next_landlord_flag = False
+    def _add_limited_planes_with_wings(self, actions, counts):
+        runs = []
+        run = []
+        for c in NORMAL_CHAIN_ORDER:
+            if counts.get(c, 0) >= 3:
+                run.append(c)
+            else:
+                if len(run) >= 2:
+                    runs.append(run)
+                run = []
+        if len(run) >= 2:
+            runs.append(run)
 
-        if action.comboType == CardComboType.PASS_:
-            next_player = last_player
-            if last_player == (turn + 2) % 3:
-                next_combo = last_combo
-        elif action.comboType in (CardComboType.BOMB, CardComboType.ROCKET):
-            next_score *= 2
+        for run in runs:
+            for L in range(2, len(run) + 1):
+                for i in range(0, len(run) - L + 1):
+                    trio_seq = run[i : i + L]
+                    base = "".join(c * 3 for c in trio_seq)
+                    base_set = set(trio_seq)
+                    solo_wings = [c for c in CARD_ORDER if c not in base_set and counts.get(c, 0) >= 1]
+                    pair_wings = [c for c in NORMAL_CHAIN_ORDER + ["2"] if c not in base_set and counts.get(c, 0) >= 2]
+                    for wings in list(combinations(solo_wings, L))[: self.cfg["max_wing_combinations"]]:
+                        actions.add(base + "".join(wings))
+                    for wings in list(combinations(pair_wings, L))[: self.cfg["max_wing_combinations"]]:
+                        actions.add(base + "".join(w * 2 for w in wings))
 
-        new_hands = [h.clone() for h in node.hands]
-        new_hands[turn].erase(action.cards)
-        next_node = TreeNode((turn + 1) % 3, new_hands)
-        return next_node, next_combo, next_player, next_score, next_landlord_flag
+    def can_beat(self, action_str, target_str):
+        if not action_str:
+            return False
+        if not target_str:
+            return True
 
-    # ---------------- leaf = original high-rank MCTS rollout ----------------
-    def _leaf_mcts_value(
-        self,
-        node: TreeNode,
-        last_combo: CardCombo,
-        last_player: int,
-        total_score: int,
-        landlord_has_not_played: bool,
-    ) -> float:
-        self.stats["leaf_mcts_values"] = self.stats.get("leaf_mcts_values", 0) + 1
-        rollouts = max(1, int(self.cfg.get("max_leaf_rollouts_per_value", 1)))
-        total = 0.0
-        old_total = self.totalScore
-        old_landlord_flag = self.landlordHasNotPlayed_
+        a_type, a_rank = self.get_card_type(action_str)
+        t_type, t_rank = self.get_card_type(target_str)
+        a_norm = self.normalize_type(a_type)
+        t_norm = self.normalize_type(t_type)
+
+        if a_norm == "rocket":
+            return t_norm != "rocket"
+        if a_norm == "bomb":
+            if t_norm == "rocket":
+                return False
+            if t_norm == "bomb":
+                return a_rank > t_rank
+            return True
+        if t_norm in ["bomb", "rocket"]:
+            return False
+
+        if a_norm != t_norm:
+            return False
+        if len(action_str) != len(target_str):
+            return False
+        return a_rank > t_rank
+
+    def get_card_type(self, action_str):
+        if action_str == "":
+            return "pass", -1
+        action_str = self.sort_card_str(action_str)
+
+        if CARD_TYPE is not None:
+            for s in [action_str, self.sort_card_str(action_str)]:
+                try:
+                    info = CARD_TYPE[0][s][0]
+                    return str(info[0]), int(info[1])
+                except Exception:
+                    pass
+
+        counts = Counter(action_str)
+        n = len(action_str)
+        max_count = max(counts.values()) if counts else 0
+
+        if n == 1:
+            return "solo", self.main_rank_value(action_str)
+        if n == 2:
+            if set(action_str) == set(["B", "R"]):
+                return "rocket", 100
+            if max_count == 2:
+                return "pair", self.main_rank_value(action_str)
+        if n == 3 and max_count == 3:
+            return "trio", self.main_rank_value(action_str)
+        if n == 4 and max_count == 4:
+            return "bomb", self.main_rank_value(action_str)
+        if self._is_solo_chain(action_str):
+            return "solo_chain", self.main_rank_value(action_str)
+        if self._is_pair_chain(action_str):
+            return "pair_chain", self.main_rank_value(action_str)
+        if self._is_trio_chain(action_str):
+            return "trio_chain", self.main_rank_value(action_str)
+        if max_count == 3:
+            return "trio_with", self.main_rank_value(action_str)
+        if max_count == 4 and n > 4:
+            return "four_with", self.main_rank_value(action_str)
+        return "unknown", self.main_rank_value(action_str)
+
+    def normalize_type(self, action_type):
+        s = str(action_type).lower()
+        if "rocket" in s:
+            return "rocket"
+        if "bomb" in s:
+            return "bomb"
+        if "solo_chain" in s or "single_chain" in s or "solo chain" in s or "sequence" in s and "pair" not in s:
+            return "solo_chain"
+        if "pair_chain" in s or "pair chain" in s:
+            return "pair_chain"
+        if "trio_chain" in s or "plane" in s:
+            return "trio_chain"
+        if "trio" in s or "three" in s:
+            return "trio"
+        if "pair" in s:
+            return "pair"
+        if "solo" in s or "single" in s:
+            return "solo"
+        if "four" in s:
+            return "four_with"
+        return s
+
+    def _is_consecutive(self, ranks):
+        if not ranks:
+            return False
         try:
-            for _ in range(rollouts):
-                self.totalScore = total_score
-                self.landlordHasNotPlayed_ = landlord_has_not_played
-                total += self.MCTS(node.clone(), last_combo, last_player)
-            return total / rollouts
-        finally:
-            self.totalScore = old_total
-            self.landlordHasNotPlayed_ = old_landlord_flag
+            idxs = [NORMAL_CHAIN_ORDER.index(c) for c in ranks]
+        except ValueError:
+            return False
+        return max(idxs) - min(idxs) + 1 == len(idxs) and len(set(idxs)) == len(idxs)
 
-    # ---------------- terminal/scoring helpers ----------------
-    def _terminal_winner(self, node: TreeNode):
-        for p in range(PLAYER_COUNT):
-            if node.hands[p].getLength() == 0:
-                return p
+    def _is_solo_chain(self, action_str):
+        counts = Counter(action_str)
+        return len(action_str) >= 5 and all(v == 1 for v in counts.values()) and self._is_consecutive(list(counts.keys()))
+
+    def _is_pair_chain(self, action_str):
+        counts = Counter(action_str)
+        return len(counts) >= 3 and all(v == 2 for v in counts.values()) and self._is_consecutive(list(counts.keys()))
+
+    def _is_trio_chain(self, action_str):
+        counts = Counter(action_str)
+        return len(counts) >= 2 and all(v == 3 for v in counts.values()) and self._is_consecutive(list(counts.keys()))
+
+    # ============================================================
+    # Hand/evaluation helpers
+    # ============================================================
+
+    def hand_badness(self, hand_str):
+        if not hand_str:
+            return 0.0
+
+        counts = Counter(hand_str)
+        singles = pairs = trios = bombs = controls = 0
+        for c, cnt in counts.items():
+            if cnt == 1:
+                singles += 1
+            elif cnt == 2:
+                pairs += 1
+            elif cnt == 3:
+                trios += 1
+            elif cnt == 4:
+                bombs += 1
+            if c in ["A", "2", "B", "R"]:
+                controls += cnt
+
+        turns = singles + pairs + trios + bombs
+        chain_discount = self.chain_discount(counts)
+
+        bad = 0.0
+        bad += self.cfg["badness_turn_weight"] * turns
+        bad += self.cfg["badness_single_weight"] * singles
+        bad += self.cfg["badness_len_weight"] * len(hand_str)
+        bad -= self.cfg["badness_chain_discount_weight"] * chain_discount
+        bad -= self.cfg["badness_control_discount"] * controls
+        bad -= self.cfg["badness_bomb_discount"] * bombs
+        return bad
+
+    def chain_discount(self, counts):
+        discount = 0.0
+
+        run = 0
+        for c in NORMAL_CHAIN_ORDER:
+            if counts.get(c, 0) >= 1:
+                run += 1
+            else:
+                if run >= 5:
+                    discount += self.cfg["solo_chain_coef"] * (run - 4)
+                run = 0
+        if run >= 5:
+            discount += self.cfg["solo_chain_coef"] * (run - 4)
+
+        run = 0
+        for c in NORMAL_CHAIN_ORDER:
+            if counts.get(c, 0) >= 2:
+                run += 1
+            else:
+                if run >= 3:
+                    discount += self.cfg["pair_chain_coef"] * (run - 2)
+                run = 0
+        if run >= 3:
+            discount += self.cfg["pair_chain_coef"] * (run - 2)
+
+        run = 0
+        for c in NORMAL_CHAIN_ORDER:
+            if counts.get(c, 0) >= 3:
+                run += 1
+            else:
+                if run >= 2:
+                    discount += self.cfg["trio_chain_coef"] * (run - 1)
+                run = 0
+        if run >= 2:
+            discount += self.cfg["trio_chain_coef"] * (run - 1)
+
+        return discount
+
+    def count_bombs(self, hand):
+        counts = Counter(hand)
+        n = sum(1 for c in NORMAL_CHAIN_ORDER + ["2"] if counts.get(c, 0) >= 4)
+        if counts.get("B", 0) and counts.get("R", 0):
+            n += 1
+        return n
+
+    def control_count(self, hand):
+        return sum(1 for c in hand if c in ["A", "2", "B", "R"])
+
+    def min_card(self, hand_str):
+        if not hand_str:
+            return ""
+        return min(hand_str, key=lambda c: INDEX[c])
+
+    def main_rank_value(self, action_str):
+        if not action_str:
+            return -1
+        counts = Counter(action_str)
+        max_count = max(counts.values())
+        main_cards = [c for c, cnt in counts.items() if cnt == max_count]
+        return max(RealCard2EnvCard[c] for c in main_cards if c in RealCard2EnvCard)
+
+    def is_bomb_or_rocket(self, action_type):
+        s = str(action_type).lower()
+        return "bomb" in s or "rocket" in s
+
+    def is_rocket(self, action_str, action_type):
+        s = str(action_type).lower()
+        return "rocket" in s or set(action_str) == set(["B", "R"])
+
+    def is_chain_type(self, action_type):
+        s = str(action_type).lower()
+        return "chain" in s or "sequence" in s or "plane" in s
+
+    def action_cost(self, action_str, state):
+        a_type, _ = self.get_card_type(action_str)
+        cost = 0.0
+        cost += self.cfg["follow_cost_len_weight"] * len(action_str)
+        cost += self.cfg["follow_cost_rank_weight"] * self.main_rank_value(action_str)
+        cost += self.control_cost(action_str, state if isinstance(state, dict) else {"dangerous": False})
+        if self.is_bomb_or_rocket(a_type):
+            cost += self.cfg["follow_cost_bomb_weight"]
+        return cost
+
+    def choose_lowest_cost_action(self, actions, state=None):
+        if not actions:
+            return []
+        best = None
+        best_cost = float("inf")
+        st = state if isinstance(state, dict) else {"dangerous": False}
+        for action in actions:
+            a_str = self.env_cards_to_real_str(action) if not isinstance(action, str) else action
+            cost = self.action_cost(a_str, st)
+            if cost < best_cost:
+                best_cost = cost
+                best = action
+        return best if best is not None else random.choice(actions)
+
+    def control_cost(self, action_str, state):
+        cost = 0.0
+        for c in action_str:
+            if c == "A":
+                cost += self.cfg["A_cost"]
+            elif c == "2":
+                cost += self.cfg["2_cost"]
+            elif c == "B":
+                cost += self.cfg["B_cost"]
+            elif c == "R":
+                cost += self.cfg["R_cost"]
+        if isinstance(state, dict) and state.get("dangerous", False):
+            cost *= self.cfg["danger_control_scale"]
+        return cost
+
+    # ============================================================
+    # Risk estimation
+    # ============================================================
+
+    def estimate_beaten_risk(self, action_str, action_type, belief):
+        if not action_str:
+            return 0.0
+        type_str = str(action_type).lower()
+        unknown = belief["unknown_counter"]
+
+        if self.is_rocket(action_str, type_str):
+            return 0.0
+
+        if self.is_bomb_or_rocket(type_str):
+            main = self.main_rank_value(action_str)
+            higher_bombs = 0
+            for c in CARD_ORDER:
+                if c in ["B", "R"]:
+                    continue
+                if RealCard2EnvCard[c] > main and unknown[c] >= 4:
+                    higher_bombs += 1
+            return min(
+                self.cfg["risk_cap"],
+                belief["rocket_prob"] + self.cfg["higher_bomb_risk_weight"] * higher_bombs,
+            )
+
+        same_type_risk = self.estimate_same_type_risk(action_str, type_str, unknown)
+        return min(
+            self.cfg["risk_cap"],
+            same_type_risk
+            + self.cfg["bomb_risk_weight"] * belief["bomb_prob"]
+            + self.cfg["rocket_risk_weight"] * belief["rocket_prob"],
+        )
+
+    def estimate_same_type_risk(self, action_str, action_type, unknown):
+        counts = Counter(action_str)
+        if not counts:
+            return 0.0
+
+        main = self.main_rank_value(action_str)
+        max_count = max(counts.values())
+        n = len(action_str)
+        if n == 1:
+            need = 1
+        elif n == 2 and max_count == 2:
+            need = 2
+        elif max_count == 3:
+            need = 3
+        else:
+            need = max_count
+
+        pressure = 0.0
+        for c in CARD_ORDER:
+            if c in ["B", "R"]:
+                continue
+            if RealCard2EnvCard[c] <= main:
+                continue
+            if unknown[c] >= need:
+                pressure += (unknown[c] / 4.0) ** need
+
+        return min(
+            self.cfg["same_type_risk_cap"],
+            1.0 - math.exp(-self.cfg["same_type_exp_weight"] * pressure),
+        )
+
+    # ============================================================
+    # Role helpers
+    # ============================================================
+
+    def get_enemy_positions(self):
+        if self.position == "landlord":
+            return ["landlord_down", "landlord_up"]
+        return ["landlord"]
+
+    def get_teammate_position(self):
+        if self.position == "landlord":
+            return None
+        if self.position == "landlord_down":
+            return "landlord_up"
+        if self.position == "landlord_up":
+            return "landlord_down"
         return None
 
-    def _terminal_score_from_winner(self, winner: int, node: TreeNode, total_score: int, landlord_has_not_played: bool) -> int:
-        score = int(total_score)
-        if (
-            winner == self.landlordPosition
-            and node.hands[(self.landlordPosition + 1) % 3].getLength() == 17
-            and node.hands[(self.landlordPosition + 2) % 3].getLength() == 17
-        ):
-            score *= 2
-        elif winner != self.landlordPosition and landlord_has_not_played:
-            score *= 2
-
-        if winner == self.myPosition:
-            return score
-        if self.myPosition != self.landlordPosition and winner != self.landlordPosition:
-            return score
-        return -score
-
-    def _same_team_index(self, p1: int, p2: int) -> bool:
-        if p1 == self.landlordPosition or p2 == self.landlordPosition:
+    def same_team(self, p1, p2):
+        if p1 is None or p2 is None:
+            return False
+        if p1 == "landlord" or p2 == "landlord":
             return p1 == p2
-        return p1 != self.landlordPosition and p2 != self.landlordPosition
+        return p1 in ["landlord_down", "landlord_up"] and p2 in ["landlord_down", "landlord_up"]
 
-    def _softmin(self, values, temp: float = 4.0) -> float:
-        if not values:
-            return 0.0
+    def pid_to_position(self, pid):
+        if pid is None:
+            return None
+        if isinstance(pid, int):
+            return INDEX_POS.get(pid)
+        if pid in POS_INDEX:
+            return pid
+        return None
+
+    def is_teammate_last_player(self, state):
+        if self.position == "landlord":
+            return False
+        last_pos = self.pid_to_position(state.get("last_pid"))
+        return last_pos == state.get("teammate_position")
+
+    def is_enemy_last_player(self, state):
+        last_pos = self.pid_to_position(state.get("last_pid"))
+        if last_pos is None:
+            return False
+        return not self.same_team(last_pos, self.position)
+
+    def player_is_dangerous_enemy(self, sim, player):
+        hands = self.tuple_to_hands(sim.hands_tuple)
+        enemies = [p for p in ALL_POSITIONS if not self.same_team(p, player)]
+        return min(len(hands[p]) for p in enemies) <= self.cfg["danger_cards"]
+
+    def any_enemy_of_player_dangerous(self, sim, player):
+        return self.player_is_dangerous_enemy(sim, player)
+
+    # ============================================================
+    # Card/string conversion and hand manipulation
+    # ============================================================
+
+    def can_remove(self, hand_str, action_str):
+        hand_counter = Counter(hand_str)
+        action_counter = Counter(action_str)
+        for c, cnt in action_counter.items():
+            if hand_counter.get(c, 0) < cnt:
+                return False
+        return True
+
+    def remove_action_from_hand(self, hand_str, action_str):
+        counter = Counter(hand_str)
+        for c in action_str:
+            counter[c] -= 1
+            if counter[c] <= 0:
+                del counter[c]
+        result = ""
+        for c in CARD_ORDER:
+            result += c * counter.get(c, 0)
+        return result
+
+    def env_cards_to_real_list(self, cards):
+        result = []
+        if cards is None:
+            return result
+        if isinstance(cards, str):
+            for c in cards:
+                if c in INDEX:
+                    result.append(c)
+            result.sort(key=lambda x: INDEX[x])
+            return result
+        for c in cards:
+            if c in EnvCard2RealCard:
+                result.append(EnvCard2RealCard[c])
+            elif isinstance(c, str) and c in INDEX:
+                result.append(c)
+        result.sort(key=lambda x: INDEX[x])
+        return result
+
+    def env_cards_to_real_str(self, cards):
+        return "".join(self.env_cards_to_real_list(cards))
+
+    def sort_card_str(self, card_str):
+        return "".join(sorted(card_str, key=lambda x: INDEX[x]))
+
+    def softmax(self, scores, temp=1.0):
+        if not scores:
+            return []
         t = max(1e-6, float(temp))
-        # weights proportional to exp(-v / t), numerically stable
-        m = min(values)
-        exps = [math.exp(-(v - m) / t) for v in values]
-        s = sum(exps)
-        if s <= 0:
-            return min(values)
-        return sum(v * e / s for v, e in zip(values, exps))
+        m = max(scores)
+        exps = [math.exp((s - m) / t) for s in scores]
+        z = sum(exps)
+        if z <= 0:
+            return [1.0 / len(scores)] * len(scores)
+        return [e / z for e in exps]
 
-
-# Compatibility alias for older imports.
-BayesianSampledSearchAgent = AdversarialSearchAgent
+    def time_exceeded(self):
+        return self._deadline is not None and time.monotonic() > self._deadline
