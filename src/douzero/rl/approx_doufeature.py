@@ -525,7 +525,9 @@ def latest_checkpoint_path(flags):
 
 
 #TODO: 组装 checkpoint metadata，记录并行、更新模式和诊断文件位置。
-def training_metadata(flags, episode, epsilon, load_path, model, total_steps, diag_path):
+def training_metadata(flags, episode, epsilon, load_path, model, total_steps, diag_path,
+                      elapsed_sec=0.0, start_episode=0):
+    trained_episodes = max(0, episode - start_episode)
     return {
         "algorithm": "approx_doufeature",
         "name": flags.name,
@@ -550,6 +552,9 @@ def training_metadata(flags, episode, epsilon, load_path, model, total_steps, di
         "feature_schema": "douzero_x_batch_plus_flat_z_batch",
         "feature_dims": FEATURE_DIMS,
         "total_steps": total_steps,
+        "elapsed_sec": elapsed_sec,
+        "episodes_per_sec": trained_episodes / max(1e-6, elapsed_sec),
+        "seconds_per_episode": elapsed_sec / max(1, trained_episodes),
         "resumed_from": load_path,
         "diagnostics_csv": str(diag_path),
     }
@@ -874,11 +879,13 @@ def train(flags):
                 print(
                     "episode={} updates={} epsilon={:.4f} landlord_wp={:.3f} "
                     "avg_steps={:.1f} avg_abs_error={:.4f} buffer={} "
-                    "baseline={} speed={:.2f}eps/s".format(
+                    "baseline={} elapsed_sec={:.1f} speed={:.2f}eps/s "
+                    "sec_per_ep={:.4f}".format(
                         completed, model.num_updates, epsilon, wp, avg_steps,
                         avg_abs_error, len(replay_buffer),
                         baseline.values if flags.update_mode == "mc_adv" else "off",
-                        speed
+                        elapsed, speed,
+                        elapsed / max(1, completed - start_completed)
                     )
                 )
                 diagnostics.flush(completed, model)
@@ -888,7 +895,8 @@ def train(flags):
                 if progress_enabled and not should_log:
                     print()
                 model.save(checkpoint_path(flags, completed), training_metadata(
-                    flags, completed, epsilon, load_path, model, total_steps, diag_path
+                    flags, completed, epsilon, load_path, model, total_steps, diag_path,
+                    max(1e-6, time.time() - start), start_completed
                 ))
                 print(f"saved approx_doufeature to {checkpoint_path(flags, completed)}")
                 next_save += flags.save_interval
@@ -904,7 +912,8 @@ def train(flags):
     diagnostics.flush(completed, model)
     model.metadata["return_baseline"] = dict(baseline.values)
     model.save(final_path, training_metadata(
-        flags, completed, epsilon, load_path, model, total_steps, diag_path
+        flags, completed, epsilon, load_path, model, total_steps, diag_path,
+        max(1e-6, time.time() - start), start_completed
     ))
     print(f"saved approx_doufeature to {final_path}")
     return model

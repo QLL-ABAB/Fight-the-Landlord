@@ -218,12 +218,16 @@ def latest_checkpoint_path(flags):
 
 
 def training_metadata(flags, global_episode, epsilon, load_path, total_steps,
-                      last_episode_steps):
+                      last_episode_steps, elapsed_sec=0.0, completed_episodes=0):
+    trained_episodes = max(0, global_episode - completed_episodes)
     return {
         "name": flags.name,
         "episodes": global_episode,
         "total_steps": total_steps,
         "last_episode_steps": last_episode_steps,
+        "elapsed_sec": elapsed_sec,
+        "episodes_per_sec": trained_episodes / max(1e-6, elapsed_sec),
+        "seconds_per_episode": elapsed_sec / max(1, trained_episodes),
         "objective": flags.objective,
         "alpha": flags.alpha,
         "gamma": flags.gamma,
@@ -551,10 +555,15 @@ def train(flags):
                 print()
             win_rate = sum(recent_landlord_wins) / float(len(recent_landlord_wins))
             avg_steps = sum(recent_steps) / float(len(recent_steps))
+            elapsed = max(1e-6, time.time() - start_time)
             print(
                 "episode={} q_size={} epsilon={:.4f} landlord_wp={:.3f} "
-                "avg_steps={:.1f}".format(
-                    global_episode, len(qtable.values), epsilon, win_rate, avg_steps
+                "avg_steps={:.1f} elapsed_sec={:.1f} speed={:.2f}eps/s "
+                "sec_per_ep={:.4f}".format(
+                    global_episode, len(qtable.values), epsilon, win_rate, avg_steps,
+                    elapsed,
+                    episode / elapsed,
+                    elapsed / max(1, episode)
                 )
             )
 
@@ -563,7 +572,8 @@ def train(flags):
                 print()
             path = checkpoint_path(flags, global_episode)
             qtable.save(path, metadata=training_metadata(
-                flags, global_episode, epsilon, load_path, total_steps, steps
+                flags, global_episode, epsilon, load_path, total_steps, steps,
+                max(1e-6, time.time() - start_time), completed_episodes
             ))
             print("saved Q table to {}".format(path))
 
@@ -573,7 +583,8 @@ def train(flags):
     final_episode = completed_episodes + flags.episodes
     final_path = checkpoint_path(flags, final_episode)
     qtable.save(final_path, metadata=training_metadata(
-        flags, final_episode, epsilon, load_path, total_steps, last_steps
+        flags, final_episode, epsilon, load_path, total_steps, last_steps,
+        max(1e-6, time.time() - start_time), completed_episodes
     ))
     print("saved Q table to {}".format(final_path))
     return qtable

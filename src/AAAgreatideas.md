@@ -36,6 +36,76 @@ feature(s, a) = concat(x_batch, flatten(z_batch))
 - `z_batch`：最近若干轮公共出牌历史，用 DouZero 的历史编码方式展开。
 - 地主特征维度为 `1183`，农民特征维度为 `1294`。
 
+具体维度构成：
+
+```text
+一组牌面编码 = 54 维
+= 13 个普通点数 * 4 张 + 大小王 2 张
+= 52 + 2
+```
+
+地主 `landlord` 的特征：
+
+```text
+x_batch = 373 维
+z_batch = 5 * 162 = 810 维
+总维度 = 373 + 810 = 1183
+```
+
+其中地主的 `x_batch=373` 来自：
+
+```text
+my_hand                 54  当前地主手牌
+other_hand              54  两个农民合并后的未知/对手牌信息
+last_action             54  上一个动作
+landlord_up_played      54  地主上家已经出过的牌
+landlord_down_played    54  地主下家已经出过的牌
+landlord_up_left        17  地主上家剩余牌数 one-hot
+landlord_down_left      17  地主下家剩余牌数 one-hot
+bomb_num                15  当前炸弹数量 one-hot
+action                  54  当前候选动作
+合计                   373
+```
+
+农民 `landlord_up / landlord_down` 的特征：
+
+```text
+x_batch = 484 维
+z_batch = 5 * 162 = 810 维
+总维度 = 484 + 810 = 1294
+```
+
+其中农民的 `x_batch=484` 来自：
+
+```text
+my_hand                 54  当前农民手牌
+other_hand              54  其他玩家牌信息
+landlord_played         54  地主已经出过的牌
+teammate_played         54  队友农民已经出过的牌
+last_action             54  上一个动作
+last_landlord_action    54  地主上一次动作
+last_teammate_action    54  队友农民上一次动作
+landlord_left           20  地主剩余牌数 one-hot
+teammate_left           17  队友剩余牌数 one-hot
+bomb_num                15  当前炸弹数量 one-hot
+action                  54  当前候选动作
+合计                   484
+```
+
+`z_batch=810` 来自最近公共出牌历史：
+
+```text
+5 组历史块 * 3 个玩家动作 * 54 维牌面编码
+= 5 * 3 * 54
+= 810
+```
+
+直观理解：
+
+- `x_batch` 描述当前局面和当前候选动作。
+- `z_batch` 描述最近出牌历史。
+- `approx_doufeature` 把这两部分直接拼成一个大向量，然后用线性权重 `w_position` 计算 `Q(s,a)`。
+
 效果和现象：
 
 - 使用 DouZero 特征后，TD 版本明显强于旧人工特征版本，说明特征表达是原 ApproxQ 失败的重要原因。

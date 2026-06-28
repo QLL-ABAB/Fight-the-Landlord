@@ -148,6 +148,12 @@ def _approx_doufeature(position: str, model_path: str | None):
     return ApproxDouFeatureAgent(position, model_path)
 
 
+def _attention_dou(position: str, model_path: str | None):
+    from douzero.evaluation.attention_dou_agent import AttentionDouAgent
+
+    return AttentionDouAgent(position, model_path)
+
+
 def _search(_: str, arg: str | None):
     from douzero.evaluation.search_agent import SearchAgent
 
@@ -223,6 +229,12 @@ AGENT_SPECS = (
         ("approxdou", "approxdf"),
         _approx_doufeature,
         description="Linear ApproxQ with original DouZero x/z features",
+    ),
+    AgentSpec(
+        "attention_dou",
+        ("attentiondou", "attndou", "attn_dou"),
+        _attention_dou,
+        description="Multi-head attention Q-network on DouZero 54-dim tokens",
     ),
     AgentSpec(
         "nnpolicy",
