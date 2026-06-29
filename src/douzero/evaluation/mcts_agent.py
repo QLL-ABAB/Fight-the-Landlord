@@ -1,6 +1,8 @@
 # mcts_agent.py
-# Enhanced MCTS for Dou Dizhu – with determinization, bomb-aware, leading/following differentiation,
-# and explicit farmer cooperation.
+# Enhanced MCTS with RLCard rollout (default) and prior utility from HighRankMonteCarloAgent
+# Improved determinization sampling using random subset selection
+# Added enhanced bidding via fast sampling rollouts
+# ------------------------------------------------------------
 
 import random
 import copy
@@ -11,6 +13,19 @@ from collections import Counter
 from douzero.env.move_generator import MovesGener
 from douzero.env import move_detector as md
 from douzero.env import move_selector as ms
+
+# 导入 HR-MC 相关类（用于 utility）
+from .high_rank_montecarlo_agent import (
+    HighRankMonteCarloAgent,
+    CardCombinations,
+    env_action_to_concrete,
+)
+
+# 导入 RLCardAgent 用于默认 rollout
+from .rlcard_agent import RLCardAgent
+
+# 导入 ApproxDouFeatureAgent 作为可选 RL rollout
+from .approx_doufeature_agent import ApproxDouFeatureAgent
 
 ALL_POSITIONS = ['landlord', 'landlord_down', 'landlord_up']
 
@@ -28,8 +43,9 @@ NORMAL_CHAIN_ORDER = CARD_ORDER[:-2]   # 不含2和王
 
 class MCTSAgent:
     def __init__(self, num_simulations=200, position=None, c=1.414,
-                 max_rollout_steps=50, time_budget=0.2,
-                 num_determinizations=8, objective="logadp"):
+                 max_rollout_steps=50, time_budget=0.3,
+                 num_determinizations=8, objective="logadp",
+                 rollout_policy='rlcard'):
         self.num_simulations = num_simulations
         self.position = position
         self.c = c
@@ -37,19 +53,23 @@ class MCTSAgent:
         self.time_budget = time_budget
         self.num_determinizations = num_determinizations
         self.objective = objective
+        self.rollout_policy = rollout_policy
         self.name = "MCTS_Enhanced"
 
         self._legal_cache = {}
 
         self.cfg = {
-            "eval_badness_weight": 1.0,
-            "eval_count_weight": 7.0,
+            # 评估函数权重（已修改，保留部分用于上下文奖励）
             "eval_enemy_danger_penalty": 180.0,
             "eval_team_danger_bonus": 120.0,
             "eval_initiative_bonus": 16.0,
             "eval_last_pid_bonus": 24.0,
             "eval_bomb_bonus": 16.0,
-            "eval_control_bonus": 3.5,
+            "eval_control_bonus": 3.5,      # 保留但不使用（已用utility替代）
+            "danger_cards": 2,
+            "very_danger_cards": 1,
+            "leading_initiative_bonus": 20.0,   # 新增：主动出牌额外奖励
+            # 保留旧的hand_badness参数（作为回退）
             "badness_turn_weight": 7.0,
             "badness_single_weight": 3.0,
             "badness_len_weight": 1.2,
@@ -59,8 +79,7 @@ class MCTSAgent:
             "solo_chain_coef": 1.0,
             "pair_chain_coef": 1.5,
             "trio_chain_coef": 2.0,
-            "danger_cards": 2,
-            "very_danger_cards": 1,
+            # MCTS相关
             "leading_c_multiplier": 0.8,
             "following_c_multiplier": 1.2,
             "leading_initiative_bonus": 25.0,
@@ -69,24 +88,159 @@ class MCTSAgent:
             "teammate_block_penalty": 35.0,
         }
 
-    # ================== 叫牌（可选） ==================
+        # [PRIOR] 创建 HR-MC 代理实例，用于计算 utility
+        try:
+            self._hr_agent = HighRankMonteCarloAgent(
+                position=self.position,
+                time_limit_sec=0.01,
+                n_root_actions=1,
+                seed=42
+            )
+        except Exception:
+            self._hr_agent = None
+        self._hr_alpha = 19
+        self._utility_cache = {}
+
+        # 初始化 rollout 策略
+        self._rollout_agent = None
+        if rollout_policy == 'approx':
+            try:
+                self._rollout_agent = ApproxDouFeatureAgent(self.position)
+            except Exception:
+                print("Warning: ApproxDouFeatureAgent init failed, fallback to heuristic")
+                self._rollout_agent = None
+        elif rollout_policy == 'rlcard':
+            try:
+                self._rollout_agent = RLCardAgent(self.position)
+            except Exception:
+                print("Warning: RLCardAgent init failed, fallback to heuristic")
+                self._rollout_agent = None
+        elif isinstance(rollout_policy, str) and rollout_policy != 'heuristic':
+            try:
+                self._rollout_agent = ApproxDouFeatureAgent(self.position, model_path=rollout_policy)
+            except Exception:
+                print(f"Warning: Failed to load rollout model from {rollout_policy}, fallback to heuristic")
+                self._rollout_agent = None
+        elif hasattr(rollout_policy, 'act'):
+            self._rollout_agent = rollout_policy
+        else:
+            self._rollout_agent = None
+
+    # ================== 叫牌（增强版） ==================
     def bid(self, hand_cards, three_landlord_cards=None):
-        hand_str = self._env_cards_to_real_str(hand_cards)
+        """
+        增强叫牌决策：通过采样隐藏牌和多局快速模拟，评估每个叫分（0~3）的期望胜率。
+        返回最佳叫分（0-3）。
+        """
+        # 1. 准备工作：获取手牌和未知牌池
+        my_hand_str = self._env_cards_to_real_str(hand_cards)
+        full_deck = Counter()
+        for c in CARD_ORDER:
+            full_deck[c] = 1 if c in ['B','R'] else 4
+        for c in my_hand_str:
+            full_deck[c] -= 1
+        # 若底牌已知（测试时），从牌池移除
         if three_landlord_cards:
-            hand_str += self._env_cards_to_real_str(three_landlord_cards)
-        bad = self._hand_badness(hand_str)
-        counts = Counter(hand_str)
-        bombs = sum(1 for c in NORMAL_CHAIN_ORDER + ["2"] if counts.get(c, 0) >= 4)
-        rockets = 1 if counts.get("B", 0) and counts.get("R", 0) else 0
-        control = sum(cnt for c, cnt in counts.items() if c in ["A", "2", "B", "R"])
-        strength = -bad + 5 * bombs + 8 * rockets + 0.5 * control
-        if strength > 35:
-            return 3
-        elif strength > 20:
-            return 2
-        elif strength > 8:
-            return 1
-        return 0
+            for c in three_landlord_cards:
+                if c in full_deck:
+                    full_deck[c] -= 1
+        for c in list(full_deck.keys()):
+            if full_deck[c] < 0:
+                full_deck[c] = 0
+        unknown_cards = []
+        for c, cnt in full_deck.items():
+            unknown_cards.extend([c]*cnt)
+
+        other_positions = [p for p in ALL_POSITIONS if p != self.position]
+        num_worlds = 30  # 采样世界数
+        bid_scores = {0: 0.0, 1: 0.0, 2: 0.0, 3: 0.0}
+
+        # 2. 对每个叫分进行模拟
+        for bid_score in [0, 1, 2, 3]:
+            wins = 0
+            for _ in range(num_worlds):
+                # 随机打乱未知牌
+                shuffled = unknown_cards[:]
+                random.shuffle(shuffled)
+                # 分配两个农民各17张，底牌3张（总牌数可能不够，但正常应为37张）
+                if len(shuffled) < 37:
+                    continue
+                farmer1 = shuffled[:17]
+                farmer2 = shuffled[17:34]
+                public = shuffled[34:37]  # 三张底牌
+
+                if bid_score > 0:
+                    # 当前玩家叫地主，获得底牌
+                    landlord = self.position
+                    landlord_hand = my_hand_str + ''.join(public)
+                    farmer_pos = other_positions
+                    assign = {
+                        landlord: landlord_hand,
+                        farmer_pos[0]: ''.join(farmer1),
+                        farmer_pos[1]: ''.join(farmer2)
+                    }
+                    target_landlord = landlord
+                else:
+                    # 当前玩家不叫，随机选一个其他玩家成为地主（并获得底牌）
+                    landlord_idx = random.randint(0,1)
+                    landlord = other_positions[landlord_idx]
+                    if landlord_idx == 0:
+                        farmer_other = other_positions[1]
+                        landlord_hand = ''.join(farmer1) + ''.join(public)
+                        farmer_hand = ''.join(farmer2)
+                    else:
+                        farmer_other = other_positions[0]
+                        landlord_hand = ''.join(farmer2) + ''.join(public)
+                        farmer_hand = ''.join(farmer1)
+                    assign = {
+                        landlord: landlord_hand,
+                        self.position: my_hand_str,
+                        farmer_other: farmer_hand
+                    }
+                    target_landlord = landlord
+
+                # 将字符串转为环境整数列表
+                hand_env = {}
+                for pos, hand_str in assign.items():
+                    hand_env[pos] = [RealCard2EnvCard[c] for c in hand_str if c in RealCard2EnvCard]
+
+                # 创建游戏状态，当前玩家为 self.position
+                state = _GameState(hand_env, self.position, (), None, 0)
+                # 快速模拟一局
+                winner = self._fast_rollout(state)
+                # 判断胜利条件
+                if bid_score > 0:
+                    if winner == self.position:
+                        wins += 1
+                else:
+                    # 农民胜利：地主输
+                    if winner != target_landlord:
+                        wins += 1
+            bid_scores[bid_score] = wins / max(1, num_worlds)
+
+        # 3. 选择最优叫分
+        best_score = max(bid_scores.values())
+        best_bids = [b for b, v in bid_scores.items() if v == best_score]
+        return random.choice(best_bids)
+
+    def _fast_rollout(self, state):
+        """
+        快速模拟一局完整斗地主，返回获胜者位置（'landlord'/'landlord_up'/'landlord_down'）。
+        使用启发式策略（复用现有的 _heuristic_rollout_policy）。
+        """
+        sim = copy.deepcopy(state)
+        while not sim.is_done():
+            legal = sim.get_legal_actions()
+            if not legal:
+                break
+            is_leading = (sim.last_move is None or len(sim.last_move) == 0)
+            action = self._heuristic_rollout_policy(sim, legal, is_leading)
+            sim.step(action)
+        # 找出手牌为空的玩家
+        for pos in ALL_POSITIONS:
+            if len(sim.hand_cards[pos]) == 0:
+                return pos
+        return None
 
     # ================== 核心决策 ==================
     def act(self, infoset):
@@ -118,6 +272,8 @@ class MCTSAgent:
         root_visits = {self._action_key(a): 0 for a in legal_actions}
         deadline = time.time() + self.time_budget
 
+        self._utility_cache.clear()
+
         for hand_assign in worlds:
             if time.time() > deadline:
                 break
@@ -130,7 +286,10 @@ class MCTSAgent:
             root.untried_actions = [self._action_key(a) for a in legal]
             for a in legal:
                 a_key = self._action_key(a)
-                child_node = self.Node(state, a)
+                child_state = copy.deepcopy(state)
+                child_state.step(a)
+                prior = self._compute_prior(child_state, self.position)
+                child_node = self.Node(state, a, prior=prior)
                 root.children[a_key] = child_node
 
             effective_c = self.c
@@ -157,8 +316,8 @@ class MCTSAgent:
 
     # ================== MCTS 内部类 ==================
     class Node:
-        __slots__ = ['state', 'action', 'parent', 'children', 'n', 'w', 'untried_actions']
-        def __init__(self, state, action, parent=None):
+        __slots__ = ['state', 'action', 'parent', 'children', 'n', 'w', 'untried_actions', 'prior']
+        def __init__(self, state, action, parent=None, prior=0.0):
             self.state = state
             self.action = action
             self.parent = parent
@@ -166,6 +325,7 @@ class MCTSAgent:
             self.n = 0
             self.w = 0
             self.untried_actions = []
+            self.prior = prior
 
     def _select(self, node, state, c):
         while not state.is_done():
@@ -188,7 +348,8 @@ class MCTSAgent:
             return node
         new_state = copy.deepcopy(state)
         new_state.step(action)
-        child = self.Node(new_state, action, parent=node)
+        prior = self._compute_prior(new_state, self.position)
+        child = self.Node(new_state, action, parent=node, prior=prior)
         node.children[action_key] = child
         return child
 
@@ -199,14 +360,19 @@ class MCTSAgent:
         best_score = -float('inf')
         best = None
         for child in node.children.values():
-            exploit = child.w / child.n if child.n > 0 else 0.0
-            explore = c * math.sqrt(log_parent / child.n) if child.n > 0 else float('inf')
+            if child.n == 0:
+                exploit = child.prior
+                explore = c * math.sqrt(log_parent / 1.0)
+            else:
+                exploit = child.w / child.n
+                explore = c * math.sqrt(log_parent / child.n)
             score = exploit + explore
             if score > best_score:
                 best_score = score
                 best = child
         return best
 
+    # ===== 模拟 =====
     def _simulate(self, state, is_leading):
         sim_state = copy.deepcopy(state)
         steps = 0
@@ -214,7 +380,10 @@ class MCTSAgent:
             legal = sim_state.get_legal_actions()
             if not legal:
                 break
-            action = self._heuristic_rollout_policy(sim_state, legal, is_leading)
+            if self._rollout_agent is not None:
+                action = self._rl_rollout_policy(sim_state, legal)
+            else:
+                action = self._heuristic_rollout_policy(sim_state, legal, is_leading)
             sim_state.step(action)
             steps += 1
         if not sim_state.is_done():
@@ -223,82 +392,39 @@ class MCTSAgent:
         bomb_num = sim_state.bomb_num
         return self._terminal_value(winner, bomb_num)
 
-    def _backup(self, node, value, current_player, is_leading):
-        while node is not None:
-            node.n += 1
-            if node.action is not None and node.parent is not None:
-                actor = node.parent.state.current_player if node.parent.state else current_player
-                # 农民协作惩罚：队友压制队友
-                if (self.position != "landlord" and
-                    node.parent.state and
-                    self._same_team(actor, self.position) and
-                    node.action and
-                    self._is_teammate_last_player_from_state(node.parent.state) and
-                    len(node.action) > 0):
-                    value -= self.cfg["teammate_block_penalty"] / max(1, node.n)
-                if self._same_team(actor, self.position):
-                    node.w += value
-                else:
-                    node.w -= value
+    def _rl_rollout_policy(self, state, legal_actions):
+        infoset = self._build_infoset_from_state(state, legal_actions)
+        try:
+            action = self._rollout_agent.act(infoset)
+            if action in legal_actions:
+                return action
             else:
-                node.w += value
-            node = node.parent
+                return self._heuristic_rollout_policy(state, legal_actions, False)
+        except Exception:
+            return self._heuristic_rollout_policy(state, legal_actions, False)
 
-    # ================== 启发式评估 ==================
-    def _evaluate_state(self, state, is_leading):
-        hands = state.hand_cards
-        landlord = "landlord"
-        farmers = ["landlord_down", "landlord_up"]
-
-        def good_value(pos):
-            h = "".join(self._env_cards_to_real_list(hands[pos]))
-            return -self.cfg["eval_badness_weight"] * self._hand_badness(h) \
-                   - self.cfg["eval_count_weight"] * len(h)
-
-        if self.position == landlord:
-            root_team_good = good_value(landlord)
-            enemy_good = max(good_value(farmers[0]), good_value(farmers[1]))
-            val = root_team_good - enemy_good
+    def _build_infoset_from_state(self, state, legal_actions):
+        class SimInfoset:
+            pass
+        infoset = SimInfoset()
+        infoset.legal_actions = legal_actions
+        infoset.player_hand_cards = state.hand_cards[state.current_player].copy()
+        infoset.last_move = list(state.last_move) if state.last_move else []
+        if state.last_move:
+            infoset.last_two_moves = [[], list(state.last_move)]
         else:
-            teammate = self._teammate_position()
-            root_team_good = max(good_value(self.position), good_value(teammate))
-            enemy_good = good_value(landlord)
-            val = root_team_good - enemy_good
-
-        for p in ALL_POSITIONS:
-            n = len(hands[p])
-            if n <= self.cfg["very_danger_cards"]:
-                bonus = self.cfg["eval_team_danger_bonus"] if self._same_team(p, self.position) \
-                        else -self.cfg["eval_enemy_danger_penalty"]
-                val += bonus
-            elif n <= self.cfg["danger_cards"]:
-                bonus = 0.45 * self.cfg["eval_team_danger_bonus"] if self._same_team(p, self.position) \
-                        else -0.45 * self.cfg["eval_enemy_danger_penalty"]
-                val += bonus
-
-        if self._same_team(state.current_player, self.position) and not state.last_move:
-            val += self.cfg["eval_initiative_bonus"]
-            if is_leading:
-                val += self.cfg["leading_initiative_bonus"]
-        if state.last_pid is not None and self._same_team(state.last_pid, self.position):
-            val += self.cfg["eval_last_pid_bonus"]
-
-        if (not is_leading and state.last_move and state.last_pid is not None and
-            not self._same_team(state.last_pid, self.position) and
-            self._same_team(state.current_player, self.position)):
-            val += self.cfg["following_beat_bonus"]
-
-        if self.position != "landlord":
-            teammate = self._teammate_position()
-            if teammate and len(hands.get(teammate, [])) <= self.cfg["teammate_release_bonus"]:
-                val += self.cfg["teammate_release_bonus"] / 10.0
-
-        for p in ALL_POSITIONS:
-            sign = 1.0 if self._same_team(p, self.position) else -1.0
-            val += sign * self.cfg["eval_bomb_bonus"] * self._count_bombs(hands[p])
-            val += sign * self.cfg["eval_control_bonus"] * self._control_count(hands[p])
-
-        return max(-1.0, min(1.0, val / 200.0))
+            infoset.last_two_moves = [[], []]
+        infoset.last_pid = state.last_pid
+        infoset.card_play_action_seq = []
+        infoset.played_cards = {}
+        infoset.all_handcards = {p: h.copy() for p, h in state.hand_cards.items()}
+        infoset.player_position = state.current_player
+        infoset.bomb_num = state.bomb_num
+        num_cards_left = {p: len(h) for p, h in state.hand_cards.items()}
+        infoset.num_cards_left_dict = num_cards_left
+        infoset.three_landlord_cards = []
+        infoset.last_move_dict = {}
+        return infoset
 
     def _heuristic_rollout_policy(self, state, legal_actions, is_leading):
         if is_leading:
@@ -335,7 +461,169 @@ class MCTSAgent:
                 return len(a) * 10 - self._main_rank_value(a)
             return min(candidates, key=score)
 
-    # ================== 辅助函数（牌型、手牌、采样等） ==================
+    def _backup(self, node, value, current_player, is_leading):
+        while node is not None:
+            node.n += 1
+            if node.action is not None and node.parent is not None:
+                actor = node.parent.state.current_player if node.parent.state else current_player
+                if (self.position != "landlord" and
+                    node.parent.state and
+                    self._same_team(actor, self.position) and
+                    node.action and
+                    self._is_teammate_last_player_from_state(node.parent.state) and
+                    len(node.action) > 0):
+                    value -= self.cfg["teammate_block_penalty"] / max(1, node.n)
+                if self._same_team(actor, self.position):
+                    node.w += value
+                else:
+                    node.w -= value
+            else:
+                node.w += value
+            node = node.parent
+
+    # ================== 先验计算 ==================
+    def _compute_prior(self, state, root_position):
+        if self._hr_agent is None:
+            return 0.0
+        player = state.current_player
+        hand_env = state.hand_cards[player]
+        key = (player, tuple(sorted(hand_env)))
+        if key in self._utility_cache:
+            util = self._utility_cache[key]
+        else:
+            try:
+                concrete = env_action_to_concrete(hand_env, used=set())
+            except Exception:
+                util = 0.0
+            else:
+                hand_cc = CardCombinations(concrete)
+                util = self._hr_agent.utility(hand_cc, alpha=self._hr_alpha)
+            self._utility_cache[key] = util
+
+        if self._same_team(player, root_position):
+            sign = 1.0
+        else:
+            sign = -1.0
+        normalized = sign * util / 100.0
+        return max(-1.0, min(1.0, normalized))
+
+    # ================== 评估函数（重写，基于HR-MC utility） ==================
+    def _evaluate_state(self, state, is_leading):
+        """
+        基于 HR-MC 的 utility 评估局面价值，同时保留上下文奖励。
+        值越大表示对根阵营越有利。
+        """
+        hands = state.hand_cards
+        landlord = "landlord"
+        farmers = ["landlord_down", "landlord_up"]
+
+        # 1. 使用 HR-MC utility 计算手牌结构价值
+        if self.position == landlord:
+            root_team_value = self._get_hand_utility(landlord, hands[landlord])
+            enemy_value = max(
+                self._get_hand_utility(farmers[0], hands[farmers[0]]),
+                self._get_hand_utility(farmers[1], hands[farmers[1]])
+            )
+            val = root_team_value - enemy_value
+        else:
+            teammate = self._teammate_position()
+            root_team_value = max(
+                self._get_hand_utility(self.position, hands[self.position]),
+                self._get_hand_utility(teammate, hands[teammate])
+            )
+            enemy_value = self._get_hand_utility(landlord, hands[landlord])
+            val = root_team_value - enemy_value
+
+        # 2. 危险牌数奖励/惩罚（纯utility无法体现即时威胁）
+        for p in ALL_POSITIONS:
+            n = len(hands[p])
+            if n <= self.cfg["very_danger_cards"]:
+                bonus = self.cfg["eval_team_danger_bonus"] if self._same_team(p, self.position) \
+                        else -self.cfg["eval_enemy_danger_penalty"]
+                val += bonus
+            elif n <= self.cfg["danger_cards"]:
+                bonus = 0.45 * self.cfg["eval_team_danger_bonus"] if self._same_team(p, self.position) \
+                        else -0.45 * self.cfg["eval_enemy_danger_penalty"]
+                val += bonus
+
+        # 3. 主动权和最后出牌权奖励
+        if self._same_team(state.current_player, self.position) and not state.last_move:
+            val += self.cfg["eval_initiative_bonus"]
+            if is_leading:
+                val += self.cfg["leading_initiative_bonus"]
+        if state.last_pid is not None and self._same_team(state.last_pid, self.position):
+            val += self.cfg["eval_last_pid_bonus"]
+
+        # 4. 炸弹显式奖励（utility已含，这里额外加强）
+        for p in ALL_POSITIONS:
+            sign = 1.0 if self._same_team(p, self.position) else -1.0
+            bomb_count = self._count_bombs(hands[p])
+            val += sign * self.cfg["eval_bomb_bonus"] * bomb_count
+
+        # 5. 归一化，HR-MC utility 通常在数百量级，除以200缩放
+        return max(-1.0, min(1.0, val / 200.0))
+
+    # ================== HR-MC utility 辅助方法 ==================
+    def _env_hand_to_concrete(self, hand):
+        """将环境手牌（int list）转换为 HR-MC 的具体牌（0~53）"""
+        used = set()
+        concrete = []
+        for card in hand:
+            # 环境牌映射到等级
+            if card == 20:      # 小王
+                level = 13
+            elif card == 30:    # 大王
+                level = 14
+            elif card == 17:    # 2
+                level = 12
+            else:
+                level = card - 3   # 3->0, 4->1, ..., A->11
+            # 获取该等级的具体牌 ID
+            ids = self._concrete_ids_for_level(level)
+            chosen = None
+            for cid in ids:
+                if cid not in used:
+                    chosen = cid
+                    break
+            if chosen is None:
+                chosen = ids[0]  # fallback
+            used.add(chosen)
+            concrete.append(chosen)
+        return sorted(concrete)
+
+    def _concrete_ids_for_level(self, level):
+        """返回等级对应的具体牌 ID 列表"""
+        if level == 13:   # 小王
+            return [52]
+        if level == 14:   # 大王
+            return [53]
+        return [level * 4 + i for i in range(4)]
+
+    def _get_hand_utility(self, player, hand_cards):
+        """获取手牌的 HR-MC 效用值（带缓存）"""
+        hand_tuple = tuple(sorted(hand_cards))
+        key = (player, hand_tuple)
+        if key in self._utility_cache:
+            return self._utility_cache[key]
+
+        if self._hr_agent is None:
+            # 回退到旧的 hand_badness（取负值使其方向一致，越大越好）
+            hand_str = self._env_cards_to_real_str(hand_cards)
+            util = -self._hand_badness(hand_str) - self.cfg.get("eval_count_weight", 7.0) * len(hand_str)
+        else:
+            try:
+                concrete = self._env_hand_to_concrete(hand_cards)
+                cc = CardCombinations(concrete)
+                util = self._hr_agent.utility(cc, alpha=self._hr_alpha)
+            except Exception:
+                # 异常回退
+                hand_str = self._env_cards_to_real_str(hand_cards)
+                util = -self._hand_badness(hand_str) - self.cfg.get("eval_count_weight", 7.0) * len(hand_str)
+
+        self._utility_cache[key] = util
+        return util
+
+    # ================== 辅助函数（保留原功能） ==================
     def _hand_badness(self, hand_str):
         if not hand_str:
             return 0.0
@@ -452,21 +740,42 @@ class MCTSAgent:
             return False
         return max(idxs) - min(idxs) + 1 == len(idxs) and len(set(idxs)) == len(idxs)
 
+    # ================== 改进的确定化采样方法 ==================
     def _sample_determinizations(self, infoset, n):
+        """
+        生成 n 个可能的隐藏手牌分配。
+        改进：使用随机子集选择（不放回抽样）代替顺序截取，确保每个玩家的牌是均匀随机从剩余牌中抽取的。
+        """
         my_hand = self._env_cards_to_real_str(infoset.player_hand_cards)
         unknown_counter = self._get_unknown_cards(infoset, my_hand)
         unknown_cards = []
         for c in CARD_ORDER:
             unknown_cards.extend([c] * unknown_counter[c])
 
+        # 获取每个玩家的剩余牌数
         num_left = {}
-        for pos in ALL_POSITIONS:
-            num_left[pos] = len(infoset.all_handcards[pos]) if pos in infoset.all_handcards else 0
+        if hasattr(infoset, 'num_cards_left_dict') and infoset.num_cards_left_dict:
+            num_left = infoset.num_cards_left_dict
+        elif hasattr(infoset, 'num_cards_left') and infoset.num_cards_left:
+            raw = infoset.num_cards_left
+            if isinstance(raw, dict):
+                num_left = raw
+            elif isinstance(raw, (list, tuple)):
+                for i, p in enumerate(ALL_POSITIONS):
+                    if i < len(raw):
+                        num_left[p] = raw[i]
+        else:
+            for pos in ALL_POSITIONS:
+                num_left[pos] = len(infoset.all_handcards.get(pos, []))
+
+        num_left[self.position] = len(my_hand)
 
         targets = {}
         for p in ALL_POSITIONS:
             if p != self.position:
                 targets[p] = num_left.get(p, 0)
+
+        # 确保总数匹配，以防信息不一致
         total_need = sum(targets.values())
         if total_need > len(unknown_cards):
             overflow = total_need - len(unknown_cards)
@@ -476,23 +785,35 @@ class MCTSAgent:
                 overflow -= take
                 if overflow <= 0:
                     break
+        elif total_need < len(unknown_cards):
+            # 如果有剩余未分配牌，安全起见丢弃（理论上不应发生）
+            pass
 
         worlds = []
         for _ in range(n):
+            # 复制未知牌列表
             cards = unknown_cards[:]
-            random.shuffle(cards)
             assign = {p: "" for p in ALL_POSITIONS}
             assign[self.position] = my_hand
-            idx = 0
+
+            # 对每个非我方玩家，使用 random.sample 从当前剩余牌中抽取所需数量
             for p in ALL_POSITIONS:
                 if p == self.position:
                     continue
                 cnt = targets.get(p, 0)
-                assign[p] = "".join(cards[idx:idx+cnt])
-                idx += cnt
+                if cnt > 0:
+                    # 从 cards 中随机选取 cnt 张（不放回）
+                    chosen = random.sample(cards, cnt)
+                    # 从 cards 中移除这些牌
+                    for card in chosen:
+                        cards.remove(card)
+                    assign[p] = "".join(sorted(chosen, key=lambda x: INDEX[x]))
+                else:
+                    assign[p] = ""
             worlds.append(assign)
         return worlds
 
+    # ================== 原有采样辅助（保留） ==================
     def _get_unknown_cards(self, infoset, my_hand):
         deck = Counter()
         for c in CARD_ORDER:
@@ -543,7 +864,7 @@ class MCTSAgent:
                 return False
         if p1 == "landlord" or p2 == "landlord":
             return p1 == p2
-        return True  # 两个农民同队
+        return True
 
     def _teammate_position(self):
         if self.position == "landlord":
@@ -603,7 +924,7 @@ class MCTSAgent:
         return last == self._teammate_position()
 
 
-# ========== 内部状态类（必须放在类外） ==========
+# ========== 内部状态类（修复类型问题） ==========
 class _GameState:
     _legal_cache = {}
     _players_order = ['landlord', 'landlord_down', 'landlord_up']
@@ -615,28 +936,47 @@ class _GameState:
         self.last_pid = last_pid
         self.bomb_num = bomb_num
 
+    @staticmethod
+    def _normalize_cards(cards):
+        """将任意形式的牌（字符串、字符串列表、整数列表）统一转为环境整数列表"""
+        if cards is None:
+            return []
+        if isinstance(cards, str):
+            return [RealCard2EnvCard[c] for c in cards if c in RealCard2EnvCard]
+        result = []
+        for c in cards:
+            if isinstance(c, int):
+                result.append(c)
+            elif isinstance(c, str) and c in RealCard2EnvCard:
+                result.append(RealCard2EnvCard[c])
+        return sorted(result)
+
     @classmethod
     def from_infoset_with_assign(cls, infoset, hand_assign, root_position):
         hand_cards = {}
         for pos in cls._players_order:
-            if pos in hand_assign:
-                cards = [RealCard2EnvCard[c] for c in hand_assign[pos] if c in RealCard2EnvCard]
-                cards.sort()
-                hand_cards[pos] = cards
+            if pos == root_position:
+                raw = infoset.player_hand_cards
+            elif pos in hand_assign:
+                raw = hand_assign[pos]
             else:
-                hand_cards[pos] = infoset.all_handcards.get(pos, []).copy()
-        current_player = infoset.player_position
+                raw = infoset.all_handcards.get(pos, [])
+            cards = cls._normalize_cards(raw)
+            hand_cards[pos] = cards
+
         last_move = infoset.last_move if infoset.last_move else []
+        if last_move and isinstance(last_move[0], str):
+            last_move = [RealCard2EnvCard[c] for c in last_move if c in RealCard2EnvCard]
+        last_move = tuple(sorted(last_move))
+
         raw_last_pid = infoset.last_pid
-        if isinstance(raw_last_pid, int):
-            if 0 <= raw_last_pid < len(cls._players_order):
-                last_pid = cls._players_order[raw_last_pid]
-            else:
-                last_pid = None
+        if isinstance(raw_last_pid, int) and 0 <= raw_last_pid < len(cls._players_order):
+            last_pid = cls._players_order[raw_last_pid]
         else:
             last_pid = raw_last_pid
-        bomb_num = infoset.bomb_num
-        return cls(hand_cards, current_player, tuple(last_move), last_pid, bomb_num)
+
+        bomb_num = getattr(infoset, 'bomb_num', 0)
+        return cls(hand_cards, infoset.player_position, last_move, last_pid, bomb_num)
 
     def _next_player(self):
         idx = self._players_order.index(self.current_player)
@@ -645,11 +985,17 @@ class _GameState:
     def get_legal_actions(self):
         player = self.current_player
         hand = self.hand_cards[player]
+        hand = self._normalize_cards(hand)
+        self.hand_cards[player] = hand
         if not hand:
             return []
 
+        if self.last_move and isinstance(self.last_move[0], str):
+            self.last_move = tuple(self._normalize_cards(self.last_move))
+        last_move = self.last_move
+
         hand_key = tuple(sorted(hand))
-        last_move_key = self.last_move
+        last_move_key = last_move
         key = (hand_key, last_move_key, player)
         if key in self._legal_cache:
             return list(self._legal_cache[key])
@@ -734,7 +1080,11 @@ class _GameState:
         player = self.current_player
         if action:
             for card in action:
-                self.hand_cards[player].remove(card)
+                if card in self.hand_cards[player]:
+                    self.hand_cards[player].remove(card)
+                else:
+                    # 如果牌不在手牌中，打印警告并尝试继续（避免崩溃）
+                    print(f"Warning: Card {card} not in hand {self.hand_cards[player]}, skipping removal.")
             self.last_move = action
             self.last_pid = player
             if len(action) == 4 and len(set(action)) == 1 or (len(action) == 2 and set(action) == {20, 30}):
