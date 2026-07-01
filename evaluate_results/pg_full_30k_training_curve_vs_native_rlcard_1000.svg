@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="560" viewBox="0 0 960 560">
+<rect width="100%" height="100%" fill="white" />
+<text x="480.0" y="30" text-anchor="middle" font-size="20" font-family="Arial">pg_full_30k vs Native RLCard</text>
+<line x1="80" y1="490.00" x2="930" y2="490.00" stroke="#ddd" stroke-width="1" />
+<text x="72" y="494.00" text-anchor="end" font-size="12">0.0</text>
+<line x1="80" y1="446.50" x2="930" y2="446.50" stroke="#ddd" stroke-width="1" />
+<text x="72" y="450.50" text-anchor="end" font-size="12">0.1</text>
+<line x1="80" y1="403.00" x2="930" y2="403.00" stroke="#ddd" stroke-width="1" />
+<text x="72" y="407.00" text-anchor="end" font-size="12">0.2</text>
+<line x1="80" y1="359.50" x2="930" y2="359.50" stroke="#ddd" stroke-width="1" />
+<text x="72" y="363.50" text-anchor="end" font-size="12">0.3</text>
+<line x1="80" y1="316.00" x2="930" y2="316.00" stroke="#ddd" stroke-width="1" />
+<text x="72" y="320.00" text-anchor="end" font-size="12">0.4</text>
+<line x1="80" y1="272.50" x2="930" y2="272.50" stroke="#ddd" stroke-width="1" />
+<text x="72" y="276.50" text-anchor="end" font-size="12">0.5</text>
+<line x1="80" y1="229.00" x2="930" y2="229.00" stroke="#ddd" stroke-width="1" />
+<text x="72" y="233.00" text-anchor="end" font-size="12">0.6</text>
+<line x1="80" y1="185.50" x2="930" y2="185.50" stroke="#ddd" stroke-width="1" />
+<text x="72" y="189.50" text-anchor="end" font-size="12">0.7</text>
+<line x1="80" y1="142.00" x2="930" y2="142.00" stroke="#ddd" stroke-width="1" />
+<text x="72" y="146.00" text-anchor="end" font-size="12">0.8</text>
+<line x1="80" y1="98.50" x2="930" y2="98.50" stroke="#ddd" stroke-width="1" />
+<text x="72" y="102.50" text-anchor="end" font-size="12">0.9</text>
+<line x1="80" y1="55.00" x2="930" y2="55.00" stroke="#ddd" stroke-width="1" />
+<text x="72" y="59.00" text-anchor="end" font-size="12">1.0</text>
+<line x1="80" y1="55" x2="80" y2="490" stroke="#333" stroke-width="1.5" />
+<line x1="80" y1="490" x2="930" y2="490" stroke="#333" stroke-width="1.5" />
+<line x1="80.00" y1="490" x2="80.00" y2="495" stroke="#bbb" stroke-width="1" />
+<text x="80.00" y="512" text-anchor="middle" font-size="11">2000</text>
+<line x1="140.71" y1="490" x2="140.71" y2="495" stroke="#bbb" stroke-width="1" />
+<text x="140.71" y="512" text-anchor="middle" font-size="11">4000</text>
+<line x1="201.43" y1="490" x2="201.43" y2="495" stroke="#bbb" stroke-width="1" />
+<text x="201.43" y="512" text-anchor="middle" font-size="11">6000</text>
+<line x1="262.14" y1="490" x2="262.14" y2="495" stroke="#bbb" stroke-width="1" />
+<text x="262.14" y="512" text-anchor="middle" font-size="11">8000</text>
+<line x1="322.86" y1="490" x2="322.86" y2="495" stroke="#bbb" stroke-width="1" />
+<text x="322.86" y="512" text-anchor="middle" font-size="11">10000</text>
+<line x1="383.57" y1="490" x2="383.57" y2="495" stroke="#bbb" stroke-width="1" />
+<text x="383.57" y="512" text-anchor="middle" font-size="11">12000</text>
+<line x1="444.29" y1="490" x2="444.29" y2="495" stroke="#bbb" stroke-width="1" />
+<text x="444.29" y="512" text-anchor="middle" font-size="11">14000</text>
+<line x1="505.00" y1="490" x2="505.00" y2="495" stroke="#bbb" stroke-width="1" />
+<text x="505.00" y="512" text-anchor="middle" font-size="11">16000</text>
+<line x1="565.71" y1="490" x2="565.71" y2="495" stroke="#bbb" stroke-width="1" />
+<text x="565.71" y="512" text-anchor="middle" font-size="11">18000</text>
+<line x1="626.43" y1="490" x2="626.43" y2="495" stroke="#bbb" stroke-width="1" />
+<text x="626.43" y="512" text-anchor="middle" font-size="11">20000</text>
+<line x1="687.14" y1="490" x2="687.14" y2="495" stroke="#bbb" stroke-width="1" />
+<text x="687.14" y="512" text-anchor="middle" font-size="11">22000</text>
+<line x1="747.86" y1="490" x2="747.86" y2="495" stroke="#bbb" stroke-width="1" />
+<text x="747.86" y="512" text-anchor="middle" font-size="11">24000</text>
+<line x1="808.57" y1="490" x2="808.57" y2="495" stroke="#bbb" stroke-width="1" />
+<text x="808.57" y="512" text-anchor="middle" font-size="11">26000</text>
+<line x1="869.29" y1="490" x2="869.29" y2="495" stroke="#bbb" stroke-width="1" />
+<text x="869.29" y="512" text-anchor="middle" font-size="11">28000</text>
+<line x1="930.00" y1="490" x2="930.00" y2="495" stroke="#bbb" stroke-width="1" />
+<text x="930.00" y="512" text-anchor="middle" font-size="11">30000</text>
+<text x="480.0" y="542" text-anchor="middle" font-size="14" font-family="Arial">Training Episodes</text>
+<text x="22" y="272.5" text-anchor="middle" transform="rotate(-90 22 272.5)" font-size="14" font-family="Arial">Win Rate vs RLCard</text>
+<polyline fill="none" stroke="#1f77b4" stroke-width="2.5" points="80.00,284.82 140.71,282.36 201.43,285.26 262.14,287.87 322.86,275.84 383.57,269.60 444.29,259.01 505.00,258.00 565.71,246.98 626.43,242.34 687.14,248.57 747.86,245.10 808.57,242.05 869.29,239.88 930.00,234.94" />
+<circle cx="80.00" cy="284.82" r="3.5" fill="#1f77b4" />
+<circle cx="140.71" cy="282.36" r="3.5" fill="#1f77b4" />
+<circle cx="201.43" cy="285.26" r="3.5" fill="#1f77b4" />
+<circle cx="262.14" cy="287.87" r="3.5" fill="#1f77b4" />
+<circle cx="322.86" cy="275.84" r="3.5" fill="#1f77b4" />
+<circle cx="383.57" cy="269.60" r="3.5" fill="#1f77b4" />
+<circle cx="444.29" cy="259.01" r="3.5" fill="#1f77b4" />
+<circle cx="505.00" cy="258.00" r="3.5" fill="#1f77b4" />
+<circle cx="565.71" cy="246.98" r="3.5" fill="#1f77b4" />
+<circle cx="626.43" cy="242.34" r="3.5" fill="#1f77b4" />
+<circle cx="687.14" cy="248.57" r="3.5" fill="#1f77b4" />
+<circle cx="747.86" cy="245.10" r="3.5" fill="#1f77b4" />
+<circle cx="808.57" cy="242.05" r="3.5" fill="#1f77b4" />
+<circle cx="869.29" cy="239.88" r="3.5" fill="#1f77b4" />
+<circle cx="930.00" cy="234.94" r="3.5" fill="#1f77b4" />
+<polyline fill="none" stroke="#ff7f0e" stroke-width="2.5" points="80.00,304.69 140.71,308.61 201.43,317.31 262.14,318.18 322.86,297.73 383.57,274.68 444.29,255.10 505.00,240.31 565.71,218.56 626.43,217.25 687.14,228.56 747.86,215.51 808.57,208.99 869.29,214.65 930.00,205.51" />
+<circle cx="80.00" cy="304.69" r="3.5" fill="#ff7f0e" />
+<circle cx="140.71" cy="308.61" r="3.5" fill="#ff7f0e" />
+<circle cx="201.43" cy="317.31" r="3.5" fill="#ff7f0e" />
+<circle cx="262.14" cy="318.18" r="3.5" fill="#ff7f0e" />
+<circle cx="322.86" cy="297.73" r="3.5" fill="#ff7f0e" />
+<circle cx="383.57" cy="274.68" r="3.5" fill="#ff7f0e" />
+<circle cx="444.29" cy="255.10" r="3.5" fill="#ff7f0e" />
+<circle cx="505.00" cy="240.31" r="3.5" fill="#ff7f0e" />
+<circle cx="565.71" cy="218.56" r="3.5" fill="#ff7f0e" />
+<circle cx="626.43" cy="217.25" r="3.5" fill="#ff7f0e" />
+<circle cx="687.14" cy="228.56" r="3.5" fill="#ff7f0e" />
+<circle cx="747.86" cy="215.51" r="3.5" fill="#ff7f0e" />
+<circle cx="808.57" cy="208.99" r="3.5" fill="#ff7f0e" />
+<circle cx="869.29" cy="214.65" r="3.5" fill="#ff7f0e" />
+<circle cx="930.00" cy="205.51" r="3.5" fill="#ff7f0e" />
+<polyline fill="none" stroke="#2ca02c" stroke-width="2.5" points="80.00,274.89 140.71,269.24 201.43,269.24 262.14,272.72 322.86,264.89 383.57,267.06 444.29,260.97 505.00,266.85 565.71,261.19 626.43,254.88 687.14,258.58 747.86,259.88 808.57,258.58 869.29,252.49 930.00,249.66" />
+<circle cx="80.00" cy="274.89" r="3.5" fill="#2ca02c" />
+<circle cx="140.71" cy="269.24" r="3.5" fill="#2ca02c" />
+<circle cx="201.43" cy="269.24" r="3.5" fill="#2ca02c" />
+<circle cx="262.14" cy="272.72" r="3.5" fill="#2ca02c" />
+<circle cx="322.86" cy="264.89" r="3.5" fill="#2ca02c" />
+<circle cx="383.57" cy="267.06" r="3.5" fill="#2ca02c" />
+<circle cx="444.29" cy="260.97" r="3.5" fill="#2ca02c" />
+<circle cx="505.00" cy="266.85" r="3.5" fill="#2ca02c" />
+<circle cx="565.71" cy="261.19" r="3.5" fill="#2ca02c" />
+<circle cx="626.43" cy="254.88" r="3.5" fill="#2ca02c" />
+<circle cx="687.14" cy="258.58" r="3.5" fill="#2ca02c" />
+<circle cx="747.86" cy="259.88" r="3.5" fill="#2ca02c" />
+<circle cx="808.57" cy="258.58" r="3.5" fill="#2ca02c" />
+<circle cx="869.29" cy="252.49" r="3.5" fill="#2ca02c" />
+<circle cx="930.00" cy="249.66" r="3.5" fill="#2ca02c" />
+<rect x="720" y="72" width="185" height="78" fill="white" stroke="#ccc" /><line x1="740" y1="94" x2="775" y2="94" stroke="#1f77b4" stroke-width="3" /><text x="785" y="98" font-size="13">Overall</text><line x1="740" y1="118" x2="775" y2="118" stroke="#ff7f0e" stroke-width="3" /><text x="785" y="122" font-size="13">Landlord</text><line x1="740" y1="142" x2="775" y2="142" stroke="#2ca02c" stroke-width="3" /><text x="785" y="146" font-size="13">Farmer</text>
+</svg>
