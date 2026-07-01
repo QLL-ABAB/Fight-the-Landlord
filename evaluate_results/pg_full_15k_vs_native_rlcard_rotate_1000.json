@@ -11,15 +11,15 @@
     "assignment_workers": "并行评测多少组座位组合；rotate 最多 3 组。",
     "num_workers": "每组座位组合内部并行评测多少份牌局。"
   },
-  "evaluate_name": "ac_full_10k_vs_native_rlcard_rotate_1000",
+  "evaluate_name": "pg_full_15k_vs_native_rlcard_rotate_1000",
   "mode": "rotate",
   "methods": [
-    "ac:actor_critic_checkpoints/actor_critic/ac_full_5k/10000.pkl",
+    "pg:policy_gradient_checkpoints/policy_gradient/pg_full_5k/15000.pkl",
     "rlcard",
     "rlcard"
   ],
   "raw_methods": [
-    "ac:actor_critic_checkpoints/actor_critic/ac_full_5k/10000.pkl",
+    "pg:policy_gradient_checkpoints/policy_gradient/pg_full_5k/15000.pkl",
     "rlcard",
     "rlcard"
   ],
@@ -27,188 +27,188 @@
   "num_workers": 1,
   "assignment_workers": 1,
   "summary": {
-    "ac:actor_critic_checkpoints/actor_critic/ac_full_5k/10000.pkl": {
+    "pg:policy_gradient_checkpoints/policy_gradient/pg_full_5k/15000.pkl": {
       "games": 3000,
-      "wins": 1340,
+      "wins": 1778,
       "landlord_games": 1000,
-      "landlord_wins": 412,
+      "landlord_wins": 676,
       "farmer_games": 2000,
-      "farmer_wins": 928,
-      "overall_win_rate": 0.44666666666666666,
-      "landlord_win_rate": 0.412,
-      "farmer_win_rate": 0.464
+      "farmer_wins": 1102,
+      "overall_win_rate": 0.5926666666666667,
+      "landlord_win_rate": 0.676,
+      "farmer_win_rate": 0.551
     },
     "rlcard": {
       "games": 6000,
-      "wins": 3176,
+      "wins": 2648,
       "landlord_games": 2000,
-      "landlord_wins": 1072,
+      "landlord_wins": 898,
       "farmer_games": 4000,
-      "farmer_wins": 2104,
-      "overall_win_rate": 0.5293333333333333,
-      "landlord_win_rate": 0.536,
-      "farmer_win_rate": 0.526
+      "farmer_wins": 1750,
+      "overall_win_rate": 0.44133333333333336,
+      "landlord_win_rate": 0.449,
+      "farmer_win_rate": 0.4375
     }
   },
   "assignments": [
     {
       "轮换编号": "1/3",
-      "中文说明": "第1组：ac:actor_critic_checkpoints/actor_critic/ac_full_5k/10000.pkl，农民-地主上家=rlcard，农民-地主下家=rlcard",
+      "中文说明": "第1组：pg:policy_gradient_checkpoints/policy_gradient/pg_full_5k/15000.pkl，农民-地主上家=rlcard，农民-地主下家=rlcard",
       "胜率说明": "landlord_win_rate 是地主阵营胜率，farmer_win_rate 是两个农民阵营合计胜率。",
       "ADP说明": "landlord_adp 是地主阵营平均分差，farmer_adp 是两个农民合计口径的平均分差。",
       "roles": {
-        "landlord": "ac:actor_critic_checkpoints/actor_critic/ac_full_5k/10000.pkl",
+        "landlord": "pg:policy_gradient_checkpoints/policy_gradient/pg_full_5k/15000.pkl",
         "landlord_up": "rlcard",
         "landlord_down": "rlcard"
       },
       "resolved_roles": {
-        "landlord": "ac:actor_critic_checkpoints/actor_critic/ac_full_5k/10000.pkl",
+        "landlord": "pg:policy_gradient_checkpoints/policy_gradient/pg_full_5k/15000.pkl",
         "landlord_up": "rlcard",
         "landlord_down": "rlcard"
       },
       "roles_zh": {
-        "地主": "ac:actor_critic_checkpoints/actor_critic/ac_full_5k/10000.pkl",
+        "地主": "pg:policy_gradient_checkpoints/policy_gradient/pg_full_5k/15000.pkl",
         "农民-地主上家": "rlcard",
         "农民-地主下家": "rlcard"
       },
-      "组合说明": "地主=ac:actor_critic_checkpoints/actor_critic/ac_full_5k/10000.pkl; 农民-地主上家=rlcard; 农民-地主下家=rlcard",
+      "组合说明": "地主=pg:policy_gradient_checkpoints/policy_gradient/pg_full_5k/15000.pkl; 农民-地主上家=rlcard; 农民-地主下家=rlcard",
       "games": 1000,
-      "landlord_wins": 412,
-      "farmer_wins": 588,
-      "landlord_win_rate": 0.412,
-      "farmer_win_rate": 0.588,
-      "landlord_adp": -0.338,
-      "farmer_adp": 0.338,
+      "landlord_wins": 676,
+      "farmer_wins": 324,
+      "landlord_win_rate": 0.676,
+      "farmer_win_rate": 0.324,
+      "landlord_adp": 1.076,
+      "farmer_adp": -1.076,
       "player_stats": {
-        "ac:actor_critic_checkpoints/actor_critic/ac_full_5k/10000.pkl": {
+        "pg:policy_gradient_checkpoints/policy_gradient/pg_full_5k/15000.pkl": {
           "games": 1000,
-          "wins": 412,
+          "wins": 676,
           "landlord_games": 1000,
-          "landlord_wins": 412,
+          "landlord_wins": 676,
           "farmer_games": 0,
           "farmer_wins": 0,
-          "overall_win_rate": 0.412,
-          "landlord_win_rate": 0.412,
+          "overall_win_rate": 0.676,
+          "landlord_win_rate": 0.676,
           "farmer_win_rate": null
         },
         "rlcard": {
           "games": 2000,
-          "wins": 1176,
+          "wins": 648,
           "landlord_games": 0,
           "landlord_wins": 0,
           "farmer_games": 2000,
-          "farmer_wins": 1176,
-          "overall_win_rate": 0.588,
+          "farmer_wins": 648,
+          "overall_win_rate": 0.324,
           "landlord_win_rate": null,
-          "farmer_win_rate": 0.588
+          "farmer_win_rate": 0.324
         }
       }
     },
 
     {
       "轮换编号": "2/3",
-      "中文说明": "第2组：rlcard，农民-地主上家=rlcard，农民-地主下家=ac:actor_critic_checkpoints/actor_critic/ac_full_5k/10000.pkl",
+      "中文说明": "第2组：rlcard，农民-地主上家=rlcard，农民-地主下家=pg:policy_gradient_checkpoints/policy_gradient/pg_full_5k/15000.pkl",
       "胜率说明": "landlord_win_rate 是地主阵营胜率，farmer_win_rate 是两个农民阵营合计胜率。",
       "ADP说明": "landlord_adp 是地主阵营平均分差，farmer_adp 是两个农民合计口径的平均分差。",
       "roles": {
         "landlord": "rlcard",
         "landlord_up": "rlcard",
-        "landlord_down": "ac:actor_critic_checkpoints/actor_critic/ac_full_5k/10000.pkl"
+        "landlord_down": "pg:policy_gradient_checkpoints/policy_gradient/pg_full_5k/15000.pkl"
       },
       "resolved_roles": {
         "landlord": "rlcard",
         "landlord_up": "rlcard",
-        "landlord_down": "ac:actor_critic_checkpoints/actor_critic/ac_full_5k/10000.pkl"
+        "landlord_down": "pg:policy_gradient_checkpoints/policy_gradient/pg_full_5k/15000.pkl"
       },
       "roles_zh": {
         "地主": "rlcard",
         "农民-地主上家": "rlcard",
-        "农民-地主下家": "ac:actor_critic_checkpoints/actor_critic/ac_full_5k/10000.pkl"
+        "农民-地主下家": "pg:policy_gradient_checkpoints/policy_gradient/pg_full_5k/15000.pkl"
       },
-      "组合说明": "地主=rlcard; 农民-地主上家=rlcard; 农民-地主下家=ac:actor_critic_checkpoints/actor_critic/ac_full_5k/10000.pkl",
+      "组合说明": "地主=rlcard; 农民-地主上家=rlcard; 农民-地主下家=pg:policy_gradient_checkpoints/policy_gradient/pg_full_5k/15000.pkl",
       "games": 1000,
-      "landlord_wins": 589,
-      "farmer_wins": 411,
-      "landlord_win_rate": 0.589,
-      "farmer_win_rate": 0.411,
-      "landlord_adp": 0.5,
-      "farmer_adp": -0.5,
+      "landlord_wins": 464,
+      "farmer_wins": 536,
+      "landlord_win_rate": 0.464,
+      "farmer_win_rate": 0.536,
+      "landlord_adp": -0.212,
+      "farmer_adp": 0.212,
       "player_stats": {
         "rlcard": {
           "games": 2000,
           "wins": 1000,
           "landlord_games": 1000,
-          "landlord_wins": 589,
+          "landlord_wins": 464,
           "farmer_games": 1000,
-          "farmer_wins": 411,
+          "farmer_wins": 536,
           "overall_win_rate": 0.5,
-          "landlord_win_rate": 0.589,
-          "farmer_win_rate": 0.411
+          "landlord_win_rate": 0.464,
+          "farmer_win_rate": 0.536
         },
-        "ac:actor_critic_checkpoints/actor_critic/ac_full_5k/10000.pkl": {
+        "pg:policy_gradient_checkpoints/policy_gradient/pg_full_5k/15000.pkl": {
           "games": 1000,
-          "wins": 411,
+          "wins": 536,
           "landlord_games": 0,
           "landlord_wins": 0,
           "farmer_games": 1000,
-          "farmer_wins": 411,
-          "overall_win_rate": 0.411,
+          "farmer_wins": 536,
+          "overall_win_rate": 0.536,
           "landlord_win_rate": null,
-          "farmer_win_rate": 0.411
+          "farmer_win_rate": 0.536
         }
       }
     },
 
     {
       "轮换编号": "3/3",
-      "中文说明": "第3组：rlcard，农民-地主上家=ac:actor_critic_checkpoints/actor_critic/ac_full_5k/10000.pkl，农民-地主下家=rlcard",
+      "中文说明": "第3组：rlcard，农民-地主上家=pg:policy_gradient_checkpoints/policy_gradient/pg_full_5k/15000.pkl，农民-地主下家=rlcard",
       "胜率说明": "landlord_win_rate 是地主阵营胜率，farmer_win_rate 是两个农民阵营合计胜率。",
       "ADP说明": "landlord_adp 是地主阵营平均分差，farmer_adp 是两个农民合计口径的平均分差。",
       "roles": {
         "landlord": "rlcard",
-        "landlord_up": "ac:actor_critic_checkpoints/actor_critic/ac_full_5k/10000.pkl",
+        "landlord_up": "pg:policy_gradient_checkpoints/policy_gradient/pg_full_5k/15000.pkl",
         "landlord_down": "rlcard"
       },
       "resolved_roles": {
         "landlord": "rlcard",
-        "landlord_up": "ac:actor_critic_checkpoints/actor_critic/ac_full_5k/10000.pkl",
+        "landlord_up": "pg:policy_gradient_checkpoints/policy_gradient/pg_full_5k/15000.pkl",
         "landlord_down": "rlcard"
       },
       "roles_zh": {
         "地主": "rlcard",
-        "农民-地主上家": "ac:actor_critic_checkpoints/actor_critic/ac_full_5k/10000.pkl",
+        "农民-地主上家": "pg:policy_gradient_checkpoints/policy_gradient/pg_full_5k/15000.pkl",
         "农民-地主下家": "rlcard"
       },
-      "组合说明": "地主=rlcard; 农民-地主上家=ac:actor_critic_checkpoints/actor_critic/ac_full_5k/10000.pkl; 农民-地主下家=rlcard",
+      "组合说明": "地主=rlcard; 农民-地主上家=pg:policy_gradient_checkpoints/policy_gradient/pg_full_5k/15000.pkl; 农民-地主下家=rlcard",
       "games": 1000,
-      "landlord_wins": 483,
-      "farmer_wins": 517,
-      "landlord_win_rate": 0.483,
-      "farmer_win_rate": 0.517,
-      "landlord_adp": -0.086,
-      "farmer_adp": 0.086,
+      "landlord_wins": 434,
+      "farmer_wins": 566,
+      "landlord_win_rate": 0.434,
+      "farmer_win_rate": 0.566,
+      "landlord_adp": -0.38,
+      "farmer_adp": 0.38,
       "player_stats": {
         "rlcard": {
           "games": 2000,
           "wins": 1000,
           "landlord_games": 1000,
-          "landlord_wins": 483,
+          "landlord_wins": 434,
           "farmer_games": 1000,
-          "farmer_wins": 517,
+          "farmer_wins": 566,
           "overall_win_rate": 0.5,
-          "landlord_win_rate": 0.483,
-          "farmer_win_rate": 0.517
+          "landlord_win_rate": 0.434,
+          "farmer_win_rate": 0.566
         },
-        "ac:actor_critic_checkpoints/actor_critic/ac_full_5k/10000.pkl": {
+        "pg:policy_gradient_checkpoints/policy_gradient/pg_full_5k/15000.pkl": {
           "games": 1000,
-          "wins": 517,
+          "wins": 566,
           "landlord_games": 0,
           "landlord_wins": 0,
           "farmer_games": 1000,
-          "farmer_wins": 517,
-          "overall_win_rate": 0.517,
+          "farmer_wins": 566,
+          "overall_win_rate": 0.566,
           "landlord_win_rate": null,
-          "farmer_win_rate": 0.517
+          "farmer_win_rate": 0.566
         }
       }
     }
