@@ -58,3 +58,11 @@ parser.add_argument("--progress_interval", default=500, type=int,
                     help="Refresh progress bar every N episodes; 0 disables it")
 parser.add_argument("--save_interval", default=50000, type=int,
                     help="Save checkpoint every N episodes; 0 disables interim saves")
+parser.add_argument("--feature_diag", action="store_true",
+                    help="Record per-feature training diagnostics to CSV")
+parser.add_argument("--feature_diag_path", default="", type=str,
+                    help="Optional feature diagnostics CSV path")
+parser.add_argument("--feature_diag_interval", default=0, type=int,
+                    help="Write feature diagnostics every N episodes; 0 follows log_interval")
+parser.add_argument("--feature_diag_topk", default=0, type=int,
+                    help="Only write top K features per position per window; 0 writes all")

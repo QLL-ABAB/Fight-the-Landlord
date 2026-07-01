@@ -1,0 +1,4 @@
+series,episode,x_value,win_rate
+baseline_50,2,1.0,0.5
+baseline_50,2,3.0,0.5
+precise,2,2.0,0.0

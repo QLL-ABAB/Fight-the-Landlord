@@ -6,6 +6,8 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 APPROXQ_SAVEDIR = "approx_qlearning_checkpoints/approx_qlearning"
+BETTER_APPROXQ_SAVEDIR = "approx_qlearning_checkpoints/better_approxq"
+PRECISE_APPROXQ_SAVEDIR = "approx_qlearning_checkpoints/approxq_precise"
 APPROX_DOUFEATURE_SAVEDIR = "approx_qlearning_checkpoints/approx_doufeature"
 ATTENTION_DOU_SAVEDIR = "attention_dou_checkpoints/attention_dou"
 APPROXQ_1M_HISTORY_DIR = Path(APPROXQ_SAVEDIR) / "approxq_logadp_cmp_1m_history"
@@ -42,6 +44,10 @@ class ApproxQTrainConfig:
     log_interval: int = 10000
     progress_interval: int = 500
     save_interval: int = 50000
+    feature_diag: bool = False
+    feature_diag_path: str = ""
+    feature_diag_interval: int = 0
+    feature_diag_topk: int = 0
 
 
 @dataclass(frozen=True)
@@ -63,6 +69,24 @@ class ApproxDouFeatureTrainConfig(ApproxQTrainConfig):
     learn_steps: int = 1
     baseline_beta: float = 0.01
     diag_topk: int = 20
+
+
+@dataclass(frozen=True)
+class BetterApproxQTrainConfig(ApproxQTrainConfig):
+    algorithm: str = "better_approxq"
+    savedir: str = BETTER_APPROXQ_SAVEDIR
+    feature_mode: str = "better_history"
+    alpha: float = 0.006
+    gamma: float = 1.0
+    l2: float = 0.00003
+    clip_td: float = 5.0
+
+
+@dataclass(frozen=True)
+class PreciseApproxQTrainConfig(BetterApproxQTrainConfig):
+    algorithm: str = "approxq_precise"
+    savedir: str = PRECISE_APPROXQ_SAVEDIR
+    feature_mode: str = "precise_history_full"
 
 
 @dataclass(frozen=True)
@@ -141,6 +165,101 @@ APPROXQ_TRAIN_CONFIGS = {
         progress_interval=500,
         log_interval=2500,
         save_interval=2500,
+    ),
+}
+
+
+BETTER_APPROXQ_TRAIN_CONFIGS = {
+    "better_approxq_logadp_10k": BetterApproxQTrainConfig(
+        name="better_approxq_logadp_10k",
+        episodes=10000,
+        reward_shaping=True,
+        log_interval=1000,
+        progress_interval=500,
+        save_interval=5000,
+        feature_diag=True,
+        feature_diag_interval=1000,
+    ),
+    "better_approxq_logadp_finetune_50k_time_equal": BetterApproxQTrainConfig(
+        name="better_approxq_logadp_finetune_50k_time_equal",
+        episodes=50000,
+        reward_shaping=True,
+        log_interval=2500,
+        progress_interval=500,
+        save_interval=2500,
+        feature_diag=True,
+        feature_diag_interval=2500,
+    ),
+    "better_approxq_logadp_finetune_50k_time_equal_fast": BetterApproxQTrainConfig(
+        name="better_approxq_logadp_finetune_50k_time_equal_fast",
+        episodes=50000,
+        reward_shaping=True,
+        max_candidate_actions=32,
+        log_interval=5000,
+        progress_interval=1000,
+        save_interval=10000,
+        feature_diag=False,
+    ),
+    "better_approxq_logadp_finetune_50k_time_equal_lr_1e-1": BetterApproxQTrainConfig(
+        name="better_approxq_logadp_finetune_50k_time_equal_lr_1e-1",
+        episodes=50000,
+        alpha=0.0006,
+        reward_shaping=True,
+        log_interval=2500,
+        progress_interval=500,
+        save_interval=2500,
+        feature_diag=True,
+        feature_diag_interval=2500,
+    ),
+    "better_approxq_logadp_finetune_50k_time_equal_lr_1e-2": BetterApproxQTrainConfig(
+        name="better_approxq_logadp_finetune_50k_time_equal_lr_1e-2",
+        episodes=50000,
+        alpha=0.00006,
+        reward_shaping=True,
+        log_interval=2500,
+        progress_interval=500,
+        save_interval=2500,
+        feature_diag=True,
+        feature_diag_interval=2500,
+    ),
+}
+
+
+PRECISE_APPROXQ_TRAIN_CONFIGS = {
+    "approxq_precise_full_50k_warm": PreciseApproxQTrainConfig(
+        name="approxq_precise_full_50k_warm",
+        episodes=50000,
+        load="approx_qlearning_checkpoints/better_approxq/better_approxq_full_50k_lr_1e-1/50000.pkl",
+        alpha=0.0006,
+        reward_shaping=True,
+        log_interval=2500,
+        progress_interval=500,
+        save_interval=2500,
+        feature_diag=True,
+        feature_diag_interval=2500,
+    ),
+    "approxq_precise_full_50k_warm_fast": PreciseApproxQTrainConfig(
+        name="approxq_precise_full_50k_warm_fast",
+        episodes=50000,
+        load="approx_qlearning_checkpoints/better_approxq/better_approxq_full_50k_lr_1e-1/50000.pkl",
+        alpha=0.0006,
+        reward_shaping=True,
+        max_candidate_actions=32,
+        log_interval=5000,
+        progress_interval=1000,
+        save_interval=10000,
+        feature_diag=False,
+    ),
+    "approxq_precise_full_50k_scratch": PreciseApproxQTrainConfig(
+        name="approxq_precise_full_50k_scratch",
+        episodes=50000,
+        alpha=0.0006,
+        reward_shaping=True,
+        log_interval=2500,
+        progress_interval=500,
+        save_interval=2500,
+        feature_diag=True,
+        feature_diag_interval=2500,
     ),
 }
 
@@ -276,6 +395,8 @@ ATTENTION_DOU_TRAIN_CONFIGS = {
 
 TRAIN_CONFIGS = {
     **APPROXQ_TRAIN_CONFIGS,
+    **BETTER_APPROXQ_TRAIN_CONFIGS,
+    **PRECISE_APPROXQ_TRAIN_CONFIGS,
     **APPROX_DOUFEATURE_TRAIN_CONFIGS,
     **ATTENTION_DOU_TRAIN_CONFIGS,
 }

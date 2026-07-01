@@ -1,3 +1,4 @@
+import csv
 import functools
 import math
 import os
@@ -605,7 +606,7 @@ def latest_checkpoint_path(flags):
 #note: 保存训练配置和进度，评测 agent 会读取其中的剪枝参数和 reward 设置。
 def training_metadata(flags, global_episode, epsilon, load_path, total_steps,
                       last_episode_steps, device, model, elapsed_sec=0.0,
-                      completed_episodes=0):
+                      completed_episodes=0, feature_diag_path=""):
     trained_episodes = max(0, global_episode - completed_episodes)
     return {
         "algorithm": "feature_based_approx_qlearning",
@@ -632,6 +633,14 @@ def training_metadata(flags, global_episode, epsilon, load_path, total_steps,
         "feature_dim": len(model.feature_names),
         "feature_names": list(model.feature_names),
         "updates": model.num_updates,
+        "feature_diag_enabled": bool(getattr(flags, "feature_diag", False)),
+        "feature_diag_path": feature_diag_path,
+        "feature_diag_interval": int(
+            getattr(flags, "_feature_diag_effective_interval", 0)
+            or getattr(flags, "feature_diag_interval", 0)
+            or 0
+        ),
+        "feature_diag_topk": int(getattr(flags, "feature_diag_topk", 0) or 0),
     }
 
 
@@ -675,6 +684,210 @@ def print_progress_bar(episode, total_episodes, completed_episodes, model,
         format_duration(remaining),
     )
     print(line + " " * 8, end="", flush=True)
+
+
+def default_feature_diag_path(flags):
+    return os.path.join(checkpoint_dir(flags), "feature_diagnostics.csv")
+
+
+def resolved_feature_diag_path(flags):
+    return flags.feature_diag_path or default_feature_diag_path(flags)
+
+
+def sign_of(value):
+    if value > 0:
+        return 1
+    if value < 0:
+        return -1
+    return 0
+
+
+class FeatureDiagnostics(object):
+    #note: Aggregates per-feature update pressure in one training window.
+    def __init__(self, path, feature_names, topk=0):
+        self.path = path
+        self.feature_names = tuple(feature_names)
+        self.feature_dim = len(self.feature_names)
+        self.topk = int(topk or 0)
+        self.window_start_episode = None
+        self.reset()
+
+    def reset(self):
+        self.update_count = {position: 0 for position in POSITIONS}
+        self.abs_raw_td_sum = {position: 0.0 for position in POSITIONS}
+        self.abs_clipped_td_sum = {position: 0.0 for position in POSITIONS}
+        self.feature_sum = {
+            position: [0.0 for _ in range(self.feature_dim)]
+            for position in POSITIONS
+        }
+        self.abs_feature_sum = {
+            position: [0.0 for _ in range(self.feature_dim)]
+            for position in POSITIONS
+        }
+        self.active_count = {
+            position: [0 for _ in range(self.feature_dim)]
+            for position in POSITIONS
+        }
+        self.abs_td_feature_sum = {
+            position: [0.0 for _ in range(self.feature_dim)]
+            for position in POSITIONS
+        }
+        self.signed_td_feature_sum = {
+            position: [0.0 for _ in range(self.feature_dim)]
+            for position in POSITIONS
+        }
+        self.abs_delta_w_sum = {
+            position: [0.0 for _ in range(self.feature_dim)]
+            for position in POSITIONS
+        }
+        self.signed_delta_w_sum = {
+            position: [0.0 for _ in range(self.feature_dim)]
+            for position in POSITIONS
+        }
+        self.sign_flip_count = {
+            position: [0 for _ in range(self.feature_dim)]
+            for position in POSITIONS
+        }
+
+    def observe(self, position, stats):
+        if not stats:
+            return
+        feature = stats["feature"]
+        delta_w = stats["delta_w"]
+        old_weight = stats["old_weight"]
+        new_weight = stats["new_weight"]
+        raw_td = float(stats["raw_td_error"])
+        clipped_td = float(stats["clipped_td_error"])
+
+        self.update_count[position] += 1
+        self.abs_raw_td_sum[position] += abs(raw_td)
+        self.abs_clipped_td_sum[position] += abs(clipped_td)
+        for index in range(self.feature_dim):
+            value = float(feature[index])
+            abs_value = abs(value)
+            weight_step = float(delta_w[index])
+            self.feature_sum[position][index] += value
+            self.abs_feature_sum[position][index] += abs_value
+            if abs_value > 1e-12:
+                self.active_count[position][index] += 1
+            self.abs_td_feature_sum[position][index] += abs(clipped_td) * abs_value
+            self.signed_td_feature_sum[position][index] += clipped_td * value
+            self.abs_delta_w_sum[position][index] += abs(weight_step)
+            self.signed_delta_w_sum[position][index] += weight_step
+            if (
+                sign_of(float(old_weight[index]))
+                * sign_of(float(new_weight[index]))
+                < 0
+            ):
+                self.sign_flip_count[position][index] += 1
+
+    def has_updates(self):
+        return any(self.update_count[position] > 0 for position in POSITIONS)
+
+    def ranked_indices(self, position):
+        scores = []
+        count = max(1, self.update_count[position])
+        for index in range(self.feature_dim):
+            score = (
+                self.abs_td_feature_sum[position][index] / count
+                + self.abs_delta_w_sum[position][index] / count
+                + 0.01 * self.sign_flip_count[position][index]
+            )
+            scores.append((score, index))
+        scores.sort(reverse=True)
+        if self.topk > 0:
+            scores = scores[:self.topk]
+        return [index for _, index in scores]
+
+    def flush(self, episode, model, epsilon, total_steps, elapsed_sec,
+              landlord_wp, avg_steps, avg_abs_td):
+        if not self.has_updates():
+            return
+        dirname = os.path.dirname(self.path)
+        if dirname:
+            os.makedirs(dirname, exist_ok=True)
+        write_header = not os.path.exists(self.path)
+        start_episode = (
+            self.window_start_episode
+            if self.window_start_episode is not None else
+            episode
+        )
+        with open(self.path, "a", encoding="utf-8", newline="") as handle:
+            writer = csv.writer(handle)
+            if write_header:
+                writer.writerow([
+                    "episode",
+                    "window_start_episode",
+                    "window_end_episode",
+                    "elapsed_sec",
+                    "total_steps",
+                    "epsilon",
+                    "landlord_wp",
+                    "avg_steps",
+                    "avg_abs_td",
+                    "position",
+                    "feature_index",
+                    "feature",
+                    "updates",
+                    "weight",
+                    "window_weight_delta",
+                    "abs_delta_w_sum",
+                    "signed_delta_w_sum",
+                    "avg_abs_delta_w",
+                    "mean_feature",
+                    "mean_abs_feature",
+                    "activation_rate",
+                    "avg_abs_td_x_feature",
+                    "avg_signed_td_x_feature",
+                    "abs_contribution",
+                    "signed_contribution",
+                    "sign_flips",
+                    "avg_abs_raw_td",
+                    "avg_abs_clipped_td",
+                ])
+            for position in POSITIONS:
+                count = max(1, self.update_count[position])
+                weights = model.weights[position]
+                if model.torch_backend:
+                    weights = weights.detach().cpu().tolist()
+                else:
+                    weights = list(weights)
+                for index in self.ranked_indices(position):
+                    weight = float(weights[index])
+                    mean_feature = self.feature_sum[position][index] / count
+                    mean_abs_feature = self.abs_feature_sum[position][index] / count
+                    writer.writerow([
+                        episode,
+                        start_episode,
+                        episode,
+                        elapsed_sec,
+                        total_steps,
+                        epsilon,
+                        landlord_wp,
+                        avg_steps,
+                        avg_abs_td,
+                        position,
+                        index,
+                        self.feature_names[index],
+                        self.update_count[position],
+                        weight,
+                        self.signed_delta_w_sum[position][index],
+                        self.abs_delta_w_sum[position][index],
+                        self.signed_delta_w_sum[position][index],
+                        self.abs_delta_w_sum[position][index] / count,
+                        mean_feature,
+                        mean_abs_feature,
+                        self.active_count[position][index] / float(count),
+                        self.abs_td_feature_sum[position][index] / count,
+                        self.signed_td_feature_sum[position][index] / count,
+                        abs(weight) * mean_abs_feature,
+                        weight * mean_feature,
+                        self.sign_flip_count[position][index],
+                        self.abs_raw_td_sum[position] / count,
+                        self.abs_clipped_td_sum[position] / count,
+                    ])
+        self.window_start_episode = episode + 1
+        self.reset()
 
 
 class ApproxQModel(object):
@@ -758,10 +971,15 @@ class ApproxQModel(object):
 
     #note: 按课程 Q-learning 公式更新线性权重 w。
     def update(self, position, feature, reward, next_features, alpha, gamma,
-               l2=0.0, clip_td=0.0):
+               l2=0.0, clip_td=0.0, return_stats=False):
         if self.torch_backend:
             with torch.no_grad():
                 feature = feature.to(self.device)
+                old_weight = None
+                feature_values = None
+                if return_stats:
+                    old_weight = self.weights[position].detach().cpu().tolist()
+                    feature_values = feature.detach().cpu().tolist()
                 old_value = torch.dot(self.weights[position], feature)
                 next_best = 0.0
                 if next_features is not None and next_features.numel() > 0:
@@ -770,32 +988,67 @@ class ApproxQModel(object):
                     torch.as_tensor(reward, dtype=torch.float32, device=self.device)
                     + gamma * next_best
                 )
-                delta = target - old_value
+                raw_delta = target - old_value
+                delta = raw_delta
                 if clip_td and clip_td > 0:
                     delta = torch.clamp(delta, -clip_td, clip_td)
                 update = delta * feature
                 if l2 and l2 > 0:
                     update = update - l2 * self.weights[position]
-                self.weights[position].add_(alpha * update)
+                delta_w = alpha * update
+                self.weights[position].add_(delta_w)
                 self.num_updates += 1
-                return float(abs(delta).item())
+                abs_delta = float(abs(delta).item())
+                if not return_stats:
+                    return abs_delta
+                return abs_delta, {
+                    "feature": feature_values,
+                    "old_weight": old_weight,
+                    "new_weight": self.weights[position].detach().cpu().tolist(),
+                    "delta_w": delta_w.detach().cpu().tolist(),
+                    "old_value": float(old_value.item()),
+                    "target": float(target.item()),
+                    "raw_td_error": float(raw_delta.item()),
+                    "clipped_td_error": float(delta.item()),
+                    "reward": float(reward),
+                }
 
         feature = list(feature)
         weights = self.weights[position]
+        old_weight = list(weights) if return_stats else None
         old_value = list_dot(weights, feature)
         next_best = 0.0
         if next_features is not None and next_features:
             next_best = max(self.q_values(position, next_features))
-        delta = reward + gamma * next_best - old_value
+        target = reward + gamma * next_best
+        raw_delta = target - old_value
+        delta = raw_delta
         if clip_td and clip_td > 0:
             delta = max(-clip_td, min(clip_td, delta))
+        delta_w = [] if return_stats else None
         for index, value in enumerate(feature):
             update = delta * value
             if l2 and l2 > 0:
                 update -= l2 * weights[index]
-            weights[index] += alpha * update
+            step = alpha * update
+            weights[index] += step
+            if return_stats:
+                delta_w.append(step)
         self.num_updates += 1
-        return abs(float(delta))
+        abs_delta = abs(float(delta))
+        if not return_stats:
+            return abs_delta
+        return abs_delta, {
+            "feature": list(feature),
+            "old_weight": old_weight,
+            "new_weight": list(weights),
+            "delta_w": delta_w,
+            "old_value": float(old_value),
+            "target": float(target),
+            "raw_td_error": float(raw_delta),
+            "clipped_td_error": float(delta),
+            "reward": float(reward),
+        }
 
     #note: 保存模型权重；先写临时文件再原子替换，避免进程中断留下坏 checkpoint。
     def save(self, path, metadata=None):
@@ -856,7 +1109,7 @@ class SelfPlayApproxQLearningAgent(object):
     def __init__(self, position, model, alpha, gamma, epsilon,
                  max_candidate_actions=64, reward_scale=1.0,
                  reward_shaping=False, l2=0.0, clip_td=0.0, rng=None,
-                 td_log=None):
+                 td_log=None, feature_diagnostics=None):
         self.name = "SelfPlayApproxQLearning"
         self.position = position
         self.model = model
@@ -871,6 +1124,7 @@ class SelfPlayApproxQLearningAgent(object):
         self.rng = rng or random.Random()
         self.pending = None
         self.td_log = td_log
+        self.feature_diagnostics = feature_diagnostics
 
     #note: 每局开始时清空 pending，避免跨局错误更新。
     def begin_episode(self):
@@ -892,7 +1146,7 @@ class SelfPlayApproxQLearningAgent(object):
         actions, features = self.action_features(infoset)
         if self.pending is not None:
             prev_feature, prev_reward = self.pending
-            td_error = self.model.update(
+            update_result = self.model.update(
                 self.position,
                 prev_feature,
                 reward=prev_reward,
@@ -901,7 +1155,13 @@ class SelfPlayApproxQLearningAgent(object):
                 gamma=self.gamma,
                 l2=self.l2,
                 clip_td=self.clip_td,
+                return_stats=self.feature_diagnostics is not None,
             )
+            if self.feature_diagnostics is not None:
+                td_error, stats = update_result
+                self.feature_diagnostics.observe(self.position, stats)
+            else:
+                td_error = update_result
             if self.td_log is not None:
                 self.td_log.append(td_error)
 
@@ -921,7 +1181,7 @@ class SelfPlayApproxQLearningAgent(object):
         if self.pending is None:
             return
         feature, shaped_reward = self.pending
-        td_error = self.model.update(
+        update_result = self.model.update(
             self.position,
             feature,
             reward=reward + shaped_reward,
@@ -930,7 +1190,13 @@ class SelfPlayApproxQLearningAgent(object):
             gamma=self.gamma,
             l2=self.l2,
             clip_td=self.clip_td,
+            return_stats=self.feature_diagnostics is not None,
         )
+        if self.feature_diagnostics is not None:
+            td_error, stats = update_result
+            self.feature_diagnostics.observe(self.position, stats)
+        else:
+            td_error = update_result
         if self.td_log is not None:
             self.td_log.append(td_error)
         self.pending = None
@@ -974,6 +1240,21 @@ def train(flags):
     recent_landlord_wins = deque(maxlen=max(1, flags.log_interval))
     recent_steps = deque(maxlen=max(1, flags.log_interval))
     recent_td = deque(maxlen=max(1, flags.log_interval * 4))
+    feature_diagnostics = None
+    feature_diag_path = ""
+    feature_diag_interval = 0
+    if getattr(flags, "feature_diag", False):
+        feature_diag_path = resolved_feature_diag_path(flags)
+        feature_diag_interval = int(
+            getattr(flags, "feature_diag_interval", 0) or flags.log_interval or 1
+        )
+        flags._feature_diag_effective_interval = feature_diag_interval
+        feature_diagnostics = FeatureDiagnostics(
+            feature_diag_path,
+            model.feature_names,
+            getattr(flags, "feature_diag_topk", 0),
+        )
+        feature_diagnostics.window_start_episode = completed_episodes + 1
     agents = {
         position: SelfPlayApproxQLearningAgent(
             position=position,
@@ -988,6 +1269,7 @@ def train(flags):
             clip_td=flags.clip_td,
             rng=random.Random(flags.seed + index + 1),
             td_log=recent_td,
+            feature_diagnostics=feature_diagnostics,
         )
         for index, position in enumerate(POSITIONS)
     }
@@ -1003,6 +1285,12 @@ def train(flags):
     print("Approx Q-learning device: {}".format(model.device))
     print("Feature mode: {}".format(model.feature_mode))
     print("Feature dim: {}".format(len(model.feature_names)))
+    if feature_diagnostics is not None:
+        print("Feature diagnostics: {} interval={} topk={}".format(
+            feature_diag_path,
+            feature_diag_interval,
+            getattr(flags, "feature_diag_topk", 0),
+        ))
     print("Reward objective: {} scale={} shaping={}".format(
         flags.objective, flags.reward_scale, flags.reward_shaping
     ))
@@ -1043,6 +1331,11 @@ def train(flags):
 
         should_log = flags.log_interval and episode % flags.log_interval == 0
         should_save = flags.save_interval and episode % flags.save_interval == 0
+        should_feature_diag = (
+            feature_diagnostics is not None
+            and feature_diag_interval > 0
+            and (episode % feature_diag_interval == 0 or episode == flags.episodes)
+        )
         should_progress = (
             progress_enabled
             and (
@@ -1051,6 +1344,7 @@ def train(flags):
                 or episode % flags.progress_interval == 0
                 or should_log
                 or should_save
+                or should_feature_diag
             )
         )
 
@@ -1079,6 +1373,21 @@ def train(flags):
                 )
             )
 
+        if should_feature_diag:
+            win_rate = sum(recent_landlord_wins) / float(len(recent_landlord_wins))
+            avg_steps = sum(recent_steps) / float(len(recent_steps))
+            avg_td = sum(recent_td) / float(len(recent_td)) if recent_td else 0.0
+            feature_diagnostics.flush(
+                global_episode,
+                model,
+                epsilon,
+                total_steps,
+                max(1e-6, time.time() - start_time),
+                win_rate,
+                avg_steps,
+                avg_td,
+            )
+
         if should_save:
             if progress_enabled and not should_log:
                 print()
@@ -1086,7 +1395,7 @@ def train(flags):
             model.save(path, metadata=training_metadata(
                 flags, global_episode, epsilon, load_path, total_steps,
                 steps, device, model, max(1e-6, time.time() - start_time),
-                completed_episodes
+                completed_episodes, feature_diag_path
             ))
             print("saved approximate Q model to {}".format(path))
 
@@ -1095,10 +1404,24 @@ def train(flags):
 
     final_episode = completed_episodes + flags.episodes
     final_path = checkpoint_path(flags, final_episode)
+    if feature_diagnostics is not None and feature_diagnostics.has_updates():
+        win_rate = sum(recent_landlord_wins) / float(len(recent_landlord_wins))
+        avg_steps = sum(recent_steps) / float(len(recent_steps))
+        avg_td = sum(recent_td) / float(len(recent_td)) if recent_td else 0.0
+        feature_diagnostics.flush(
+            final_episode,
+            model,
+            epsilon,
+            total_steps,
+            max(1e-6, time.time() - start_time),
+            win_rate,
+            avg_steps,
+            avg_td,
+        )
     model.save(final_path, metadata=training_metadata(
         flags, final_episode, epsilon, load_path, total_steps,
         last_steps, device, model, max(1e-6, time.time() - start_time),
-        completed_episodes
+        completed_episodes, feature_diag_path
     ))
     print("saved approximate Q model to {}".format(final_path))
     return model

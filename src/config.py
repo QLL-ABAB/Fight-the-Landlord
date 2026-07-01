@@ -211,6 +211,18 @@ def _approxq(position: str, model_path: str | None):
     return ApproxQLearningAgent(position, model_path)
 
 
+def _better_approxq(position: str, model_path: str | None):
+    from douzero.evaluation.better_approx_qlearning_agent import BetterApproxQLearningAgent
+
+    return BetterApproxQLearningAgent(position, model_path)
+
+
+def _approxq_precise(position: str, model_path: str | None):
+    from douzero.evaluation.approxq_precise_agent import PreciseApproxQLearningAgent
+
+    return PreciseApproxQLearningAgent(position, model_path)
+
+
 #TODO: 注册 DouZero 原始特征版线性 ApproxQ，支持 TD/MC 训练产物评测。
 def _approx_doufeature(position: str, model_path: str | None):
     from douzero.evaluation.approx_doufeature_agent import ApproxDouFeatureAgent
@@ -335,6 +347,18 @@ AGENT_SPECS = (
         ("approx_qlearning",),
         _approxq,
         description="Feature-based approximate Q-learning agent",
+    ),
+    AgentSpec(
+        "better_approxq",
+        ("betterapproxq", "better_approx_qlearning"),
+        _better_approxq,
+        description="ApproxQ with role-specific landlord/farmer features",
+    ),
+    AgentSpec(
+        "approxq_precise",
+        ("precise_approxq", "preciseapproxq"),
+        _approxq_precise,
+        description="ApproxQ with precise pass/control and residual-hand features",
     ),
     AgentSpec(
         "approx_doufeature",
