@@ -459,9 +459,7 @@ def plot_rows(path: Path, rows, baseline_win_rate: float, test_role: str,
     elif x_axis == "frames":
         ax.set_xlabel("Training frames")
     else:
-        ax.set_xlabel(
-            "Training episodes (DouZero frames / {:.0f})".format(avg_steps_per_episode)
-        )
+        ax.set_xlabel("Training episodes")
     ax.set_ylabel(y_label)
     ax.set_ylim(0, 1)
     ax.grid(True, linestyle=":", alpha=0.45)
