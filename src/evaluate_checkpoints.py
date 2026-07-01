@@ -14,17 +14,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-def find_checkpoints(checkpoint_dir, pattern="weights.ep.*\\.json"):
-    """Find all checkpoint files matching the pattern."""
+def find_checkpoints(checkpoint_dir, pattern=r"^weights\.ep(\d+)\.json$"):
+    """Find role-policy checkpoint files matching weights.ep{episode}.json."""
     checkpoints = []
     for f in os.listdir(checkpoint_dir):
+        path = os.path.join(checkpoint_dir, f)
+        if not os.path.isfile(path):
+            continue
         match = re.match(pattern, f)
         if match:
-            # Extract episode number from filename
-            ep_match = re.search(r'ep(\d+)', f)
-            if ep_match:
-                ep = int(ep_match.group(1))
-                checkpoints.append((ep, os.path.join(checkpoint_dir, f)))
+            ep = int(match.group(1))
+            checkpoints.append((ep, path))
     # Sort by episode number
     checkpoints.sort(key=lambda x: x[0])
     return checkpoints
@@ -85,7 +85,7 @@ def evaluate_checkpoint(weights_path, position, eval_games=100):
     return None
 
 
-def plot_trends(results, output_dir, name_suffix=""):
+def plot_trends(results, output_dir, name_suffix="", plot_name="win_rate_trend"):
     """Plot win rate trends for all three positions."""
     positions = ["landlord", "landlord_up", "landlord_down"]
     labels = ["Landlord", "Landlord Up", "Landlord Down"]
@@ -105,7 +105,7 @@ def plot_trends(results, output_dir, name_suffix=""):
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, f"win_rate_trend_all{name_suffix}.png"), dpi=150)
+    plt.savefig(os.path.join(output_dir, f"{plot_name}_all{name_suffix}.png"), dpi=150)
     plt.close()
     
     # Individual plots
@@ -119,7 +119,7 @@ def plot_trends(results, output_dir, name_suffix=""):
         plt.legend()
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, f"win_rate_trend_{position}{name_suffix}.png"), dpi=150)
+        plt.savefig(os.path.join(output_dir, f"{plot_name}_{position}{name_suffix}.png"), dpi=150)
         plt.close()
 
 
@@ -133,6 +133,8 @@ def main():
                         help="Directory to save plots")
     parser.add_argument("--name", type=str, default="",
                         help="Custom name suffix for output files (prevents overwriting)")
+    parser.add_argument("--plot-name", type=str, default="win_rate_trend",
+                        help="Base name for output plot PNG files")
     parser.add_argument("--skip-existing", action="store_true",
                         help="Skip evaluation if result file already exists")
     args = parser.parse_args()
@@ -146,7 +148,7 @@ def main():
         print(f"No checkpoints found in {args.checkpoint_dir}")
         return
     
-    print(f"Found {len(checkpoints)} checkpoints")
+    print(f"Found {len(checkpoints)} checkpoints matching weights.ep<number>.json")
     
     # Results dictionary: {episode: {position: win_rate}}
     results = {}
@@ -178,7 +180,7 @@ def main():
     print(f"Results saved to {results_file}")
     
     # Plot trends
-    plot_trends(results, args.output_dir, name_suffix)
+    plot_trends(results, args.output_dir, name_suffix, args.plot_name)
     print(f"Plots saved to {args.output_dir}")
 
 

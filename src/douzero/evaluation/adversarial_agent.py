@@ -12,7 +12,7 @@
 #   3. Prune root legal_actions to a small top-K candidate set.
 #   4. For each candidate action, run shallow team-aware adversarial search.
 #   5. Enemy nodes are NOT pure minimax; they use a greedy/softmax opponent model.
-#   6. Teammate nodes use cooperative softmax + a small max component.
+#   6. Teammate nodes are cooperative.
 #
 # This is not a full perfect-information solver and not a full ISMCTS.
 # It is a practical determinization-style shallow search agent designed to be
@@ -86,14 +86,14 @@ class AdversarialSearchAgent(object):
     """
 
     def __init__(self, position, debug=False, seed=None):
-        self.name = "BayesianSampledSearch_teammate_softmax_v1"
+        self.name = "BayesianSampledSearch_v1"
         self.position = position
         self.debug = debug
         self.rng = random.Random(seed)
 
         self.cfg = {
             # Search budget. Increase samples/depth if speed allows.
-            "num_samples": 2000,
+            "num_samples": 800,
             "search_depth": 3,            # includes plies after root action
             "time_budget_sec": 0.20,       # soft budget per act; fallback if exceeded
             "root_topk_leading": 7,
@@ -103,17 +103,6 @@ class AdversarialSearchAgent(object):
             "enemy_model_width": 2,
             "enemy_softmax_temp": 7.0,
             "ally_max_width": 4,
-
-            # Teammate model.
-            # Original version used pure max for all teammate nodes:
-            #     V_teammate(s) = max_a V(s, a)
-            # This is too optimistic for farmers, because the teammate does not
-            # know our hand and may not perfectly follow the searched line.
-            # The new version uses:
-            #     V_teammate = (1 - mix) * softmax_expectation + mix * max
-            # Smaller teammate_max_mix -> less idealized teammate.
-            "teammate_softmax_temp": 7.0,
-            "teammate_max_mix": 0.20,
 
             # Candidate generation limits.
             "max_generated_actions_per_state": 120,
@@ -383,52 +372,14 @@ class AdversarialSearchAgent(object):
             return self.evaluate_sim_state(sim)
 
         current = sim.current_player
-
-        if current == self.position:
-            # Self node: the root agent is assumed to choose the best action
-            # according to its own search value.
+        if self.same_team(current, self.position):
+            # Cooperative teammate/self nodes: choose the best action for root team.
             pruned = self.prune_sim_actions(actions, sim, root_team_node=True)
             values = []
             for a in pruned[: self.cfg["ally_max_width"]]:
                 ns = self.apply_action(sim, a)
                 values.append(self.search(ns, depth - 1))
             val = max(values) if values else self.evaluate_sim_state(sim)
-
-        elif self.same_team(current, self.position):
-            # Teammate node: cooperative, but not perfectly optimal.
-            #
-            # Original version used pure max:
-            #     V(s) = max_a V(s, a)
-            # This makes farmer agents too optimistic, because it assumes the
-            # teammate always understands and executes the best cooperative line.
-            #
-            # New version:
-            #     V_teammate(s)
-            #       = (1 - mu) * sum_a softmax(score(a)) * V(s, a)
-            #         + mu * max_a V(s, a)
-            #
-            # This keeps some cooperative assumption, but avoids treating the
-            # teammate as a perfect oracle.
-            pruned = self.prune_sim_actions(actions, sim, root_team_node=True)
-            model_actions = pruned[: self.cfg["ally_max_width"]]
-            if not model_actions:
-                val = self.evaluate_sim_state(sim)
-            else:
-                values = []
-                scores = []
-                for a in model_actions:
-                    ns = self.apply_action(sim, a)
-                    values.append(self.search(ns, depth - 1))
-                    scores.append(self.sim_action_policy_score(a, sim, root_team_node=True))
-
-                weights = self.softmax(scores, temp=self.cfg["teammate_softmax_temp"])
-                soft_val = sum(w * v for w, v in zip(weights, values))
-                max_val = max(values)
-
-                mix = float(self.cfg.get("teammate_max_mix", 0.20))
-                mix = max(0.0, min(1.0, mix))
-                val = (1.0 - mix) * soft_val + mix * max_val
-
         else:
             # Enemy nodes: not pure minimax. Use a greedy/softmax opponent model.
             pruned = self.prune_sim_actions(actions, sim, root_team_node=False)

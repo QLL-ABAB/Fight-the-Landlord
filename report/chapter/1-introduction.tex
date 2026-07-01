@@ -2,6 +2,14 @@
 
 Fight the Landlord, also known as Dou Dizhu, is a three-player card game with one landlord playing against two farmers. Although the rules are easy to describe, the decision problem is difficult for an artificial agent. A player must choose among many legal card combinations, reason about the hidden hands of the other two players, and adapt its strategy according to whether it is the landlord, the landlord's upper farmer, or the landlord's lower farmer. The game therefore combines a large action space, imperfect information, and team-based competition.
 
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{image/fight_the_landlord_example.png}
+    \caption{Visualization of Fight the Landlord game board}
+    \label{fig:board}
+\end{figure}
+
+
 From a reinforcement learning perspective, the main difficulty is that the true game state is not fully observable. A player only knows its own hand, the public action history, the last played move, the number of remaining cards for each player, and its role. The exact cards held by the other players are hidden. As a result, a naive Markov decision process over complete hands is not directly usable at decision time, while a state representation based only on the current player's hand loses too much information about the actual game context.
 
 \subsection{State Space and Imperfect Information}

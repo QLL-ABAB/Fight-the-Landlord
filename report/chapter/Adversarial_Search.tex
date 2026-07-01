@@ -1,0 +1,147 @@
+
+\subsection{Adversarial Search}
+
+The adversarial search agent is designed for decision-time planning under
+imperfect information. Unlike value-based agents, it does not learn parameters
+from self-play. Instead, it asks the following local question at every move:
+given the current information set, which legal action is most robust against
+likely responses from the other two players?
+
+The main difficulty is that Fight the Landlord is not a perfect-information
+game. The current player observes only an information set
+
+\[
+    I = (h_i, H, m_{\mathrm{last}}, c, r_i),
+\]
+
+where \(h_i\) is the player's own hand, \(H\) is the public action history,
+\(m_{\mathrm{last}}\) is the last valid move, \(c\) records the remaining card
+counts of the three players, and \(r_i\) is the role of the current player. The
+hidden hands of the other two players are unknown. Therefore, a direct minimax
+search over the true state is impossible.
+
+To approximate the hidden state, we use determinization. Let
+\(\Omega(I)\) denote the set of all complete states consistent with the
+information set. The agent samples \(N\) possible complete states
+\(s_1,\ldots,s_N \sim \Omega(I)\) by randomly assigning the unknown cards to
+the two unobserved hands according to their remaining card counts. For a root
+action \(a\), the sampled search value is
+
+\[
+    Q_{\mathrm{search}}(I,a)
+    =
+    b(I,a)
+    +
+    \frac{1}{N}
+    \sum_{k=1}^{N}
+    V_d(T(s_k,a)),
+\]
+
+where \(b(I,a)\) is an immediate tactical bonus or penalty, \(T\) is the state
+transition after playing \(a\), and \(V_d\) is a depth-limited search value. The
+term \(b(I,a)\) handles short-term tactical cases such as finishing the hand,
+blocking a dangerous enemy, releasing a teammate, avoiding unnecessary bombs,
+and penalizing risky high singles.
+
+Inside each determinized state, the search is role-aware. If the current node
+belongs to the root agent, the agent assumes it can choose the best continuation:
+
+\[
+    V(s) = \max_{a \in A_s} V(T(s,a)).
+\]
+
+For teammate nodes, using a pure maximum is too optimistic because the teammate
+does not know the root player's hidden cards and may not follow the searched
+line perfectly. We therefore combine a policy expectation with a small maximum
+component:
+
+\begin{align*}
+    V_{\mathrm{team}}(s)
+    = & \ (1-\mu)
+    \sum_{a \in A_s}
+    \pi_{\tau}(a \mid s) V(T(s,a))        \\
+      & + \mu \max_{a \in A_s} V(T(s,a)).
+\end{align*}
+
+Here \(\pi_{\tau}\) is a softmax policy over hand-crafted action scores, and
+\(\mu\) controls how much we trust the teammate to find the best cooperative
+line.
+
+For enemy nodes, a pure minimax update would be too pessimistic. It would assume
+that the opponent knows the determinized full state and always selects the most
+damaging action. However, using only a soft policy can also be too optimistic,
+because it may underweight the opponent's strongest punishments. We therefore
+use a symmetric mixed model: most of the value comes from a bounded-rational
+policy expectation, while a small component still accounts for the worst
+adversarial response:
+
+\begin{align*}
+    V_{\mathrm{enemy}}(s)
+    = & \ (1-\nu)
+    \sum_{a \in A_s}
+    \pi_{\tau}^{\mathrm{enemy}}(a \mid s)
+    V(T(s,a))                             \\
+      & + \nu \min_{a \in A_s} V(T(s,a)).
+\end{align*}
+
+The action probabilities are computed from heuristic action scores:
+
+\[
+    \pi_{\tau}(a \mid s)
+    =
+    \frac{\exp(g(s,a)/\tau)}
+    {\sum_{a'} \exp(g(s,a')/\tau)}.
+\]
+
+Here \(\nu\) controls how much pessimism is retained in the opponent model.
+This model is less paranoid than minimax but still biased toward strong
+responses. In practice, the search also prunes actions to a small top-\(K\)
+candidate set at both the root and internal nodes, which keeps the computation
+tractable.
+
+When the search reaches a terminal state, the value is a large positive or
+negative constant depending on whether the root team wins:
+
+\[
+    V(s_{\mathrm{terminal}})
+    =
+    \begin{cases}
+        +R_{\mathrm{win}}, & \text{if the root team wins}, \\
+        -R_{\mathrm{win}}, & \text{otherwise}.
+    \end{cases}
+\]
+
+At non-terminal leaf nodes, the agent falls back to a hand-crafted state
+evaluation. This evaluation rewards the root team for having fewer and better
+structured remaining cards, penalizes dangerous enemies with very few cards
+left, and adds bonuses for initiative, last valid control, bombs, and high
+control cards.
+
+Finally, the agent does not blindly trust the sampled search result. Because
+determinization and shallow search can be noisy, the chosen action must be
+sufficiently better than the baseline greedy candidate or the second-best
+candidate:
+
+\[
+    a_{\mathrm{search}} = \arg\max_a Q_{\mathrm{search}}(I,a).
+\]
+
+The search action is accepted only if
+
+\begin{align*}
+    Q(a_{\mathrm{search}}) - Q(a_{\mathrm{base}})
+     & \ge \delta_{\mathrm{base}},   \\
+    \text{or}\quad
+    Q(a_{\mathrm{search}}) - Q(a_{\mathrm{second}})
+     & \ge \delta_{\mathrm{second}}.
+\end{align*}
+
+Otherwise, the agent falls back to the baseline action. This gate makes the
+agent more stable: adversarial search is used when it gives strong evidence for
+an improvement, but the policy avoids being dominated by sampling noise or
+incorrect hidden-card assumptions.
+
+Overall, this method can be viewed as a practical approximation to
+imperfect-information minimax: hidden cards are sampled, a shallow team-aware
+search is performed on each sampled complete state, and a protected decision
+rule combines the search result with a strong heuristic baseline.

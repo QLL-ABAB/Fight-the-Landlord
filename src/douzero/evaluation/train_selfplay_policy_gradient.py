@@ -5,7 +5,8 @@
 # This version supports two modes:
 #   1. Pure role-specific self-play, same public interface as before.
 #   2. Mixed-opponent fine-tuning from an existing role-specific checkpoint:
-#        current NN vs old NN checkpoint / low-budget Monte Carlo / self-play.
+#        current NN vs old NN checkpoint / low-budget Monte Carlo / RLCard /
+#        self-play.
 #
 # No teacher labels / no distillation / no search enhancement inside the NN.
 # Opponents only play games against the current NN; the current NN is still
@@ -35,6 +36,11 @@ try:
     from douzero.evaluation.nn_policy_agent import feature_vector, feature_dim
 except Exception:
     from nn_policy_agent import feature_vector, feature_dim
+
+try:
+    from douzero.evaluation.rlcard_agent import RLCardAgent
+except Exception:
+    from rlcard_agent import RLCardAgent
 
 
 ALL_POSITIONS = ["landlord", "landlord_down", "landlord_up"]
@@ -526,6 +532,56 @@ class LowBudgetMonteCarloOpponent(object):
         return safe_heuristic_action(infoset, position)
 
 
+class RLCardOpponent(object):
+    """Use RLCard's rule-based agent as a concrete-card training opponent.
+
+    RLCardAgent operates on rank-coded cards such as 3, 4, ..., 17, 20, 30,
+    while this lightweight training environment stores concrete Botzone card
+    ids 0..53. This wrapper converts the infoset to rank cards and then maps
+    the selected rank multiset back to one of the legal concrete actions.
+    """
+
+    def __init__(self):
+        self.agents = {}
+
+    def _agent(self, position):
+        if position not in self.agents:
+            self.agents[position] = RLCardAgent(position)
+        return self.agents[position]
+
+    def act(self, infoset, position):
+        legal = infoset.legal_actions
+        if not legal:
+            return []
+        if len(legal) == 1:
+            return legal[0]
+
+        rank_legal = [concrete_action_to_env(a) for a in legal]
+        rank_infoset = SimpleInfoset(
+            position=position,
+            player_hand_cards=concrete_action_to_env(infoset.player_hand_cards),
+            legal_actions=rank_legal,
+            last_move=concrete_action_to_env(infoset.last_move),
+            last_two_moves=[concrete_action_to_env(x) for x in infoset.last_two_moves],
+            last_pid=infoset.last_pid,
+            num_cards_left=dict(infoset.num_cards_left),
+        )
+        try:
+            rank_action = self._agent(position).act(rank_infoset)
+            key = env_action_key(rank_action)
+            candidates = [
+                a for a in legal
+                if env_action_key(concrete_action_to_env(a)) == key
+            ]
+            if candidates:
+                candidates.sort(key=lambda a: (len(a), tuple(a)))
+                return candidates[0]
+        except Exception:
+            pass
+
+        return safe_heuristic_action(infoset, position)
+
+
 class OldNNOpponentPool(object):
     def __init__(self, checkpoint_paths, device, hidden_dim, layers, temperature=0.4):
         self.device = device
@@ -569,8 +625,13 @@ def safe_heuristic_action(infoset, position):
     return non_pass[0]
 
 
-def choose_mode(rng, self_ratio, mc_ratio, old_ratio, old_available):
-    total = max(0.0, self_ratio) + max(0.0, mc_ratio) + (max(0.0, old_ratio) if old_available else 0.0)
+def choose_mode(rng, self_ratio, mc_ratio, old_ratio, rlcard_ratio, old_available):
+    total = (
+        max(0.0, self_ratio)
+        + max(0.0, mc_ratio)
+        + max(0.0, rlcard_ratio)
+        + (max(0.0, old_ratio) if old_available else 0.0)
+    )
     if total <= 0:
         return "self"
     x = rng.random() * total
@@ -579,6 +640,9 @@ def choose_mode(rng, self_ratio, mc_ratio, old_ratio, old_available):
     x -= self_ratio
     if x < mc_ratio:
         return "mc"
+    x -= mc_ratio
+    if x < rlcard_ratio:
+        return "rlcard"
     return "old"
 
 
@@ -596,7 +660,8 @@ def choose_focus_role(rng, landlord_prob, down_prob, up_prob):
     return "landlord_up"
 
 
-def run_mixed_episode(env, current_models, old_pool, mc_opponent, device, temperature,
+def run_mixed_episode(env, current_models, old_pool, mc_opponent, rlcard_opponent,
+                      device, temperature,
                       mode="self", focus_role=None, max_steps=300):
     env.reset()
     transitions = []  # (log_prob, entropy, player_index, position_name)
@@ -619,6 +684,8 @@ def run_mixed_episode(env, current_models, old_pool, mc_opponent, device, temper
         else:
             if mode == "mc":
                 action = mc_opponent.act(infoset, position)
+            elif mode == "rlcard":
+                action = rlcard_opponent.act(infoset, position)
             elif mode == "old" and old_pool is not None and old_pool.has_any():
                 action = old_pool.act(infoset, position)
             else:
@@ -711,6 +778,8 @@ def main():
                     help="Ratio for current NN vs low-budget Monte Carlo opponents")
     ap.add_argument("--mix-old", type=float, default=0.30,
                     help="Ratio for current NN vs old NN checkpoints")
+    ap.add_argument("--mix-rlcard", type=float, default=0.0,
+                    help="Ratio for current NN vs RLCard rule-based opponents")
     ap.add_argument("--focus-landlord", type=float, default=0.25)
     ap.add_argument("--focus-down", type=float, default=0.50,
                     help="Sampling weight for focusing training on landlord_down in non-self modes")
@@ -782,6 +851,7 @@ def main():
     mc_opponent = LowBudgetMonteCarloOpponent(time_limit_sec=args.mc_time_limit,
                                               n_root_actions=args.mc_root_actions,
                                               seed=args.seed)
+    rlcard_opponent = RLCardOpponent()
 
     baseline = [0.0, 0.0, 0.0]
     baseline_beta = 0.98
@@ -798,11 +868,18 @@ def main():
     })
     recent_finished = 0
     recent_landlord_wins = 0
-    mode_count = {"self": 0, "mc": 0, "old": 0}
+    mode_count = {"self": 0, "mc": 0, "old": 0, "rlcard": 0}
     focus_count = {p: 0 for p in ALL_POSITIONS}
 
     for ep in range(1, args.episodes + 1):
-        mode = choose_mode(rng, args.mix_self, args.mix_mc, args.mix_old, old_pool.has_any())
+        mode = choose_mode(
+            rng,
+            args.mix_self,
+            args.mix_mc,
+            args.mix_old,
+            args.mix_rlcard,
+            old_pool.has_any(),
+        )
         focus_role = None
         if mode != "self":
             focus_role = choose_focus_role(rng, args.focus_landlord, args.focus_down, args.focus_up)
@@ -810,7 +887,7 @@ def main():
         mode_count[mode] += 1
 
         winner, multiplier, transitions, _, _ = run_mixed_episode(
-            env, models, old_pool, mc_opponent, device, temperature,
+            env, models, old_pool, mc_opponent, rlcard_opponent, device, temperature,
             mode=mode, focus_role=focus_role, max_steps=args.max_steps
         )
         if winner is None or not transitions:
@@ -856,7 +933,7 @@ def main():
                   "time", round(time.time() - t0, 1))
             recent_finished = 0
             recent_landlord_wins = 0
-            mode_count = {"self": 0, "mc": 0, "old": 0}
+            mode_count = {"self": 0, "mc": 0, "old": 0, "rlcard": 0}
             focus_count = {p: 0 for p in ALL_POSITIONS}
 
         if args.eval_every and ep % args.eval_every == 0:

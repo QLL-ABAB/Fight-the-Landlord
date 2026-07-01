@@ -1,0 +1,19 @@
+
+\subsection{Random}
+
+The random agent is the simplest baseline in our experiments. At each decision
+point, the environment provides the agent with an information set \(I\),
+including the current player's hand, the last move, public history features, and
+the legal action set \(\mathcal{A}(I)\). The random agent ignores all strategic
+information and samples uniformly from the legal actions:
+
+\[
+    a \sim \mathrm{Uniform}(\mathcal{A}(I)).
+\]
+
+In implementation, this corresponds directly to
+\texttt{random.choice(infoset.legal\_actions)}. Since the action is always
+sampled from the environment-generated legal action list, the agent never needs
+to check card-type validity by itself. This baseline is useful because it gives
+a lower-bound reference for whether a learned or heuristic policy is making
+meaningful decisions beyond simply playing legal cards.

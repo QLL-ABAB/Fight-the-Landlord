@@ -1,3 +1,13 @@
 \begin{abstract}
-Fight the Landlord is a challenging imperfect-information card game with a large combinatorial action space, hidden hands, and strong role-dependent cooperation and competition. In this project, we study several reinforcement learning and search-based approaches for building agents for this game. We first investigate value iteration and tabular value representations, but find that direct state enumeration is ineffective because the observable state must include not only the player's hand, but also public history, remaining card counts, turn context, and uncertainty over hidden cards. We then explore approximate Q-learning with history-aware features, neural policy learning through self-play, and adversarial search based on sampled determinizations of hidden hands. Finally, we combine learned Q-value estimators with adversarial search by using a trained Q model as the leaf evaluator. Our experiments and implementation process show that pure offline planning is difficult in this domain, while feature-based learning and bounded search provide more practical approximations for decision making under hidden information.
+    Fight the Landlord is a challenging imperfect-information card game with a large combinatorial action space,
+    hidden hands, and strong role-dependent cooperation and competition. In this project, we study several reinforcement
+    learning and search-based approaches for building agents for this game.
+
+    We first set the baseline:random and greedy agents. The random agent samples uniformly from the legal actions, while the greedy agent uses a small set of hand-crafted rules based on card combinations.
+
+    We then explore reinforcement learning methods, including policy gradient and q-learning, to learn policies that can adapt to different game states and roles.
+
+    Finally, we try adversarial search techniques, such as Monte Carlo Tree Search (MCTS), to improve decision-making by simulating future game states and evaluating potential actions.
+
+    Our experiments and implementation process show ;
 \end{abstract}

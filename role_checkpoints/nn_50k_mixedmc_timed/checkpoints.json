@@ -1,0 +1,194 @@
+{
+  "created_at": "2026-06-29 15:14:29",
+  "description": "Checkpoint wall-clock timing for this training run.",
+  "records": [
+    {
+      "baseline": [
+        2.198293747238694,
+        -0.6977518132508804,
+        -0.9858999218225446
+      ],
+      "created_at": "2026-06-29 15:32:39",
+      "elapsed_sec": 1082.748,
+      "elapsed_since_previous_sec": 1082.748,
+      "episode": 5000,
+      "episodes_since_previous": 5000,
+      "kind": "checkpoint",
+      "path": "D:\\skd\\CS181\\project\\Fight-the-Landlord\\role_checkpoints\\nn_50k_mixedmc_timed\\weights.ep5000.json",
+      "sec_per_episode_since_previous": 0.21655,
+      "sec_per_episode_total": 0.21655,
+      "temperature": 0.25
+    },
+    {
+      "baseline": [
+        1.4090324680132547,
+        -0.8135904943206296,
+        -0.7953424762706096
+      ],
+      "created_at": "2026-06-29 15:48:34",
+      "elapsed_sec": 2037.637,
+      "elapsed_since_previous_sec": 954.889,
+      "episode": 10000,
+      "episodes_since_previous": 5000,
+      "kind": "checkpoint",
+      "path": "D:\\skd\\CS181\\project\\Fight-the-Landlord\\role_checkpoints\\nn_50k_mixedmc_timed\\weights.ep10000.json",
+      "sec_per_episode_since_previous": 0.190978,
+      "sec_per_episode_total": 0.203764,
+      "temperature": 0.25
+    },
+    {
+      "baseline": [
+        0.7499777829187315,
+        0.23900839946469193,
+        0.2725468037207856
+      ],
+      "created_at": "2026-06-29 16:05:20",
+      "elapsed_sec": 3043.662,
+      "elapsed_since_previous_sec": 1006.026,
+      "episode": 15000,
+      "episodes_since_previous": 5000,
+      "kind": "checkpoint",
+      "path": "D:\\skd\\CS181\\project\\Fight-the-Landlord\\role_checkpoints\\nn_50k_mixedmc_timed\\weights.ep15000.json",
+      "sec_per_episode_since_previous": 0.201205,
+      "sec_per_episode_total": 0.202911,
+      "temperature": 0.25
+    },
+    {
+      "baseline": [
+        -1.0110512895606187,
+        0.7937482058446431,
+        0.8652114383977779
+      ],
+      "created_at": "2026-06-29 16:21:16",
+      "elapsed_sec": 3998.989,
+      "elapsed_since_previous_sec": 955.327,
+      "episode": 20000,
+      "episodes_since_previous": 5000,
+      "kind": "checkpoint",
+      "path": "D:\\skd\\CS181\\project\\Fight-the-Landlord\\role_checkpoints\\nn_50k_mixedmc_timed\\weights.ep20000.json",
+      "sec_per_episode_since_previous": 0.191065,
+      "sec_per_episode_total": 0.199949,
+      "temperature": 0.25
+    },
+    {
+      "baseline": [
+        0.26358831565971497,
+        -0.058046654906730784,
+        0.3514320245795167
+      ],
+      "created_at": "2026-06-29 16:36:43",
+      "elapsed_sec": 4926.497,
+      "elapsed_since_previous_sec": 927.508,
+      "episode": 25000,
+      "episodes_since_previous": 5000,
+      "kind": "checkpoint",
+      "path": "D:\\skd\\CS181\\project\\Fight-the-Landlord\\role_checkpoints\\nn_50k_mixedmc_timed\\weights.ep25000.json",
+      "sec_per_episode_since_previous": 0.185502,
+      "sec_per_episode_total": 0.19706,
+      "temperature": 0.25
+    },
+    {
+      "baseline": [
+        0.7729033717018591,
+        -0.2459810534590688,
+        -0.3738011014534247
+      ],
+      "created_at": "2026-06-29 16:54:00",
+      "elapsed_sec": 5963.038,
+      "elapsed_since_previous_sec": 1036.541,
+      "episode": 30000,
+      "episodes_since_previous": 5000,
+      "kind": "checkpoint",
+      "path": "D:\\skd\\CS181\\project\\Fight-the-Landlord\\role_checkpoints\\nn_50k_mixedmc_timed\\weights.ep30000.json",
+      "sec_per_episode_since_previous": 0.207308,
+      "sec_per_episode_total": 0.198768,
+      "temperature": 0.25
+    },
+    {
+      "baseline": [
+        1.446562203007453,
+        -0.07913350149207367,
+        -0.48330134139533304
+      ],
+      "created_at": "2026-06-29 17:10:23",
+      "elapsed_sec": 6945.98,
+      "elapsed_since_previous_sec": 982.942,
+      "episode": 35000,
+      "episodes_since_previous": 5000,
+      "kind": "checkpoint",
+      "path": "D:\\skd\\CS181\\project\\Fight-the-Landlord\\role_checkpoints\\nn_50k_mixedmc_timed\\weights.ep35000.json",
+      "sec_per_episode_since_previous": 0.196588,
+      "sec_per_episode_total": 0.198457,
+      "temperature": 0.25
+    },
+    {
+      "baseline": [
+        0.05386788472525901,
+        0.2051006185556366,
+        -0.006879165761318952
+      ],
+      "created_at": "2026-06-29 17:26:40",
+      "elapsed_sec": 7923.2,
+      "elapsed_since_previous_sec": 977.22,
+      "episode": 40000,
+      "episodes_since_previous": 5000,
+      "kind": "checkpoint",
+      "path": "D:\\skd\\CS181\\project\\Fight-the-Landlord\\role_checkpoints\\nn_50k_mixedmc_timed\\weights.ep40000.json",
+      "sec_per_episode_since_previous": 0.195444,
+      "sec_per_episode_total": 0.19808,
+      "temperature": 0.25
+    },
+    {
+      "baseline": [
+        -0.9966260444465604,
+        0.288660140003913,
+        0.2678063889581267
+      ],
+      "created_at": "2026-06-29 17:36:54",
+      "elapsed_sec": 8537.812,
+      "elapsed_since_previous_sec": 614.612,
+      "episode": 45000,
+      "episodes_since_previous": 5000,
+      "kind": "checkpoint",
+      "path": "D:\\skd\\CS181\\project\\Fight-the-Landlord\\role_checkpoints\\nn_50k_mixedmc_timed\\weights.ep45000.json",
+      "sec_per_episode_since_previous": 0.122922,
+      "sec_per_episode_total": 0.189729,
+      "temperature": 0.25
+    },
+    {
+      "baseline": [
+        0.6933696473623047,
+        -0.260522808543708,
+        0.024596172170089005
+      ],
+      "created_at": "2026-06-29 17:45:10",
+      "elapsed_sec": 9033.381,
+      "elapsed_since_previous_sec": 495.568,
+      "episode": 50000,
+      "episodes_since_previous": 5000,
+      "kind": "checkpoint",
+      "path": "D:\\skd\\CS181\\project\\Fight-the-Landlord\\role_checkpoints\\nn_50k_mixedmc_timed\\weights.ep50000.json",
+      "sec_per_episode_since_previous": 0.099114,
+      "sec_per_episode_total": 0.180668,
+      "temperature": 0.25
+    },
+    {
+      "baseline": [
+        0.6933696473623047,
+        -0.260522808543708,
+        0.024596172170089005
+      ],
+      "created_at": "2026-06-29 17:45:10",
+      "elapsed_sec": 9033.531,
+      "elapsed_since_previous_sec": 0.15,
+      "episode": 50000,
+      "episodes_since_previous": 0,
+      "kind": "final",
+      "path": "D:\\skd\\CS181\\project\\Fight-the-Landlord\\role_checkpoints\\nn_50k_mixedmc_timed\\nn_50k_mixedmc.json",
+      "sec_per_episode_since_previous": 0.150202,
+      "sec_per_episode_total": 0.180671,
+      "temperature": 0.25
+    }
+  ],
+  "run_dir": "D:\\skd\\CS181\\project\\Fight-the-Landlord\\role_checkpoints\\nn_50k_mixedmc_timed"
+}

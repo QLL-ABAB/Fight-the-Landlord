@@ -1,0 +1,46 @@
+
+\subsection{Greedy}
+
+The greedy baseline (we use it as a baseline for comparison the effect of our methods)
+corresponds to the \texttt{RLCardAgent} used in our evaluation code.
+Unlike the random agent, it uses a small set of hand-crafted rules based on card combinations.
+The agent first converts the environment's rank-coded cards into a compact string representation,
+where ranks are ordered as
+
+\[
+    3,4,5,6,7,8,9,T,J,Q,K,A,2,B,R.
+\]
+
+It then distinguishes between two cases: leading a new round and following a
+previous move.
+
+When the agent is leading, it decomposes its hand into several structural
+combinations using \texttt{combine\_cards}. The decomposition extracts
+combinations in a fixed priority order: rocket, bomb, trio, trio chain, solo
+chain, pair chain, pair, and finally solo cards.
+
+After this decomposition, the agent searches for a combination containing the
+minimum card in its current hand and plays that combination. This produces a
+simple greedy leading policy: it tends to release low cards while preserving
+larger cards and special combinations for later.
+
+When the agent is following another player's move, it uses RLCard's card-type
+table to identify the type and rank of the last move. Among all legal non-pass
+actions with the same card type, it chooses the one with the smallest rank that
+can beat the previous move. Formally, if \(\mathcal{B}(I)\) is the set of legal
+responses with the same type as the last move, the selected action is
+
+\[
+    a^* = \arg\min_{a \in \mathcal{B}(I)} \mathrm{rank}(a).
+\]
+
+If no such response exists, the agent may pass. In particular, when the previous
+valid move was made by the other farmer and the current agent is also a farmer,
+it passes to avoid beating its teammate. If none of the above rules applies, the
+agent falls back to choosing a random legal action.
+
+This greedy policy is still very limited: it does not perform long-horizon
+planning, does not estimate hidden hands, and does not learn from experience.
+However, it is stronger than a random baseline because it follows basic
+Dou Dizhu principles such as playing the lowest sufficient response, preserving
+high cards, and avoiding unnecessary interference with a teammate.
