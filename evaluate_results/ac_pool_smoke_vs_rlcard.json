@@ -1,0 +1,108 @@
+{
+  "说明": {
+    "mode": "rotate 表示三个 method 轮流担任地主；fixed 表示座位固定。",
+    "roles": "landlord=地主，landlord_up=农民-地主上家，landlord_down=农民-地主下家。",
+    "assignments": "每一项是一组座位组合，文件中用空行分隔三组 rotate 结果。",
+    "landlord_win_rate": "该组中地主阵营胜率。",
+    "farmer_win_rate": "该组中两个农民阵营合计胜率。",
+    "landlord_adp": "该组中地主阵营平均分差。",
+    "farmer_adp": "该组中农民阵营平均分差，已按两个农民合计口径输出。",
+    "summary": "按 method 汇总整体胜率、担任地主胜率、担任农民胜率。",
+    "assignment_workers": "并行评测多少组座位组合；rotate 最多 3 组。",
+    "num_workers": "每组座位组合内部并行评测多少份牌局。"
+  },
+  "evaluate_name": "ac_pool_smoke_vs_rlcard",
+  "mode": "fixed",
+  "methods": [
+    "ac:actor_critic_checkpoints/actor_critic_pool/ac_pool_smoke/2.pkl",
+    "rlcard",
+    "rlcard"
+  ],
+  "raw_methods": [
+    "ac:actor_critic_checkpoints/actor_critic_pool/ac_pool_smoke/2.pkl",
+    "rlcard",
+    "rlcard"
+  ],
+  "eval_data": "evaluate_results\\pg_env_eval_data.pkl",
+  "num_workers": 1,
+  "assignment_workers": 1,
+  "summary": {
+    "ac:actor_critic_checkpoints/actor_critic_pool/ac_pool_smoke/2.pkl": {
+      "games": 5,
+      "wins": 0,
+      "landlord_games": 5,
+      "landlord_wins": 0,
+      "farmer_games": 0,
+      "farmer_wins": 0,
+      "overall_win_rate": 0.0,
+      "landlord_win_rate": 0.0,
+      "farmer_win_rate": null
+    },
+    "rlcard": {
+      "games": 10,
+      "wins": 10,
+      "landlord_games": 0,
+      "landlord_wins": 0,
+      "farmer_games": 10,
+      "farmer_wins": 10,
+      "overall_win_rate": 1.0,
+      "landlord_win_rate": null,
+      "farmer_win_rate": 1.0
+    }
+  },
+  "assignments": [
+    {
+      "轮换编号": "1/1",
+      "中文说明": "第1组：ac:actor_critic_checkpoints/actor_critic_pool/ac_pool_smoke/2.pkl，农民-地主上家=rlcard，农民-地主下家=rlcard",
+      "胜率说明": "landlord_win_rate 是地主阵营胜率，farmer_win_rate 是两个农民阵营合计胜率。",
+      "ADP说明": "landlord_adp 是地主阵营平均分差，farmer_adp 是两个农民合计口径的平均分差。",
+      "roles": {
+        "landlord": "ac:actor_critic_checkpoints/actor_critic_pool/ac_pool_smoke/2.pkl",
+        "landlord_up": "rlcard",
+        "landlord_down": "rlcard"
+      },
+      "resolved_roles": {
+        "landlord": "ac:actor_critic_checkpoints/actor_critic_pool/ac_pool_smoke/2.pkl",
+        "landlord_up": "rlcard",
+        "landlord_down": "rlcard"
+      },
+      "roles_zh": {
+        "地主": "ac:actor_critic_checkpoints/actor_critic_pool/ac_pool_smoke/2.pkl",
+        "农民-地主上家": "rlcard",
+        "农民-地主下家": "rlcard"
+      },
+      "组合说明": "地主=ac:actor_critic_checkpoints/actor_critic_pool/ac_pool_smoke/2.pkl; 农民-地主上家=rlcard; 农民-地主下家=rlcard",
+      "games": 5,
+      "landlord_wins": 0,
+      "farmer_wins": 5,
+      "landlord_win_rate": 0.0,
+      "farmer_win_rate": 1.0,
+      "landlord_adp": -2.8,
+      "farmer_adp": 2.8,
+      "player_stats": {
+        "ac:actor_critic_checkpoints/actor_critic_pool/ac_pool_smoke/2.pkl": {
+          "games": 5,
+          "wins": 0,
+          "landlord_games": 5,
+          "landlord_wins": 0,
+          "farmer_games": 0,
+          "farmer_wins": 0,
+          "overall_win_rate": 0.0,
+          "landlord_win_rate": 0.0,
+          "farmer_win_rate": null
+        },
+        "rlcard": {
+          "games": 10,
+          "wins": 10,
+          "landlord_games": 0,
+          "landlord_wins": 0,
+          "farmer_games": 10,
+          "farmer_wins": 10,
+          "overall_win_rate": 1.0,
+          "landlord_win_rate": null,
+          "farmer_win_rate": 1.0
+        }
+      }
+    }
+  ]
+}
