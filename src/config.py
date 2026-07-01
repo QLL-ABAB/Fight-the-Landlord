@@ -270,6 +270,36 @@ def _douzero(position: str, model_path: str | None):
     return DeepAgent(position, resolve_douzero_model_path(position, model_path))
 
 
+# ---------- 新增 mcts 支持 ----------
+def _mcts(position: str, arg: str | None):
+    from douzero.evaluation.mcts_agent import MCTSAgent
+
+    num_simulations = 200
+    c = 1.414
+    time_budget = 0.3
+    if arg:
+        parts = [x.strip() for x in arg.split(":") if x.strip()]
+        if len(parts) >= 1 and parts[0].isdigit():
+            num_simulations = int(parts[0])
+        if len(parts) >= 2:
+            try:
+                c = float(parts[1])
+            except ValueError:
+                pass
+        if len(parts) >= 3:
+            try:
+                time_budget = float(parts[2])
+            except ValueError:
+                pass
+    return MCTSAgent(
+        position=position,
+        num_simulations=num_simulations,
+        c=c,
+        time_budget=time_budget
+    )
+# -----------------------------------
+
+
 AGENT_SPECS = (
     AgentSpec("rlcard", (), _rlcard, description="RLCard rule-based agent"),
     AgentSpec("random", (), _random, needs_position=False, description="Random agent"),
@@ -338,6 +368,13 @@ AGENT_SPECS = (
         ("mc", "highrankmc"),
         _montecarlo,
         description="High-rank Monte Carlo agent (translated from Botzone C++)",
+    ),
+    # 新增 mcts 规格
+    AgentSpec(
+        "mcts",
+        ("mcts_agent",),
+        _mcts,
+        description="MCTS agent with position-dependent aggression (landlord aggressive, farmers conservative)",
     ),
 )
 
