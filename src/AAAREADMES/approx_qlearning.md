@@ -118,6 +118,49 @@ EPISODES=10 \
 ./src/train_approx_qlearning_gpu.sh
 ```
 
+## 监督特征抖动
+
+训练时可以打开特征诊断 CSV，记录每个窗口内各特征的权重变化、激活强度、TD 误差关联、贡献大小和符号翻转次数：
+
+```bash
+FEATURE_DIAG=1 \
+FEATURE_DIAG_INTERVAL=10000 \
+FEATURE_DIAG_TOPK=0 \
+TASK_NAME=approxq_logadp_100k_history \
+./src/train_approx_qlearning_gpu.sh
+```
+
+默认写到：
+
+```text
+approx_qlearning_checkpoints/approx_qlearning/<TASK_NAME>/feature_diagnostics.csv
+```
+
+离线分析并画图：
+
+```bash
+PYTHONPATH=src python src/analyze_approxq_feature_diagnostics.py \
+  --diag_csv approx_qlearning_checkpoints/approx_qlearning/approxq_logadp_100k_history/feature_diagnostics.csv \
+  --output_dir visualization/approxq_feature_diagnostics \
+  --prefix approxq_logadp_100k_history
+```
+
+如果已经有 `src/plot_eval_trends.py` 生成的 checkpoint 评测胜率 CSV，可以把它传给 `--eval_csv`，用外部评测胜率替代训练窗口胜率来判断哪些特征更“跟提升同步”：
+
+```bash
+PYTHONPATH=src python src/analyze_approxq_feature_diagnostics.py \
+  --diag_csv approx_qlearning_checkpoints/approx_qlearning/approxq_logadp_100k_history/feature_diagnostics.csv \
+  --eval_csv visualization/approxq_douzero_vs_rlcard_fixed_trend_landlord.csv \
+  --eval_series approxq \
+  --output_dir visualization/approxq_feature_diagnostics
+```
+
+主要输出：
+
+- `*_feature_importance.csv`：按影响分排序，综合特征贡献、TD 误差关联和与胜率提升的同步性。
+- `*_feature_instability.csv`：按不稳定性排序，综合权重来回更新、方向切换、符号翻转和方差。
+- `*_impact_top*.png`、`*_unstable_top*.png`、`*_impact_timeline.png`、`*_unstable_delta_timeline.png`：快速查看关键特征和震荡特征。
+
 ## 和 tabular Q-learning 的区别
 
 tabular Q-learning：

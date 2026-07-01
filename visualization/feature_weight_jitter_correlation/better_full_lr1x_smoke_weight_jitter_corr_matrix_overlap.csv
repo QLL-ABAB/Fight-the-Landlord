@@ -1,0 +1,9 @@
+weight_feature,landlord:228:played_control_cards,landlord_up:228:played_control_cards,landlord:239:played_group_control_a_2_joker,landlord_down:228:played_control_cards,landlord:275:played_mid_cards_ratio,landlord:236:played_group_mid_8_to_k,landlord_down:28:action_finish,landlord:276:played_high_cards_ratio
+landlord_up:28:action_finish,20,20,20,20,20,20,20,20
+landlord:48:singles_delta,20,20,20,20,20,20,20,20
+landlord:17:hand_singles,20,20,20,20,20,20,20,20
+landlord_down:28:action_finish,20,20,20,20,20,20,20,20
+landlord:28:action_finish,20,20,20,20,20,20,20,20
+landlord:47:badness_delta,20,20,20,20,20,20,20,20
+landlord:22:hand_badness,20,20,20,20,20,20,20,20
+landlord_down:54:teammate_danger_pass,20,20,20,20,20,20,20,20

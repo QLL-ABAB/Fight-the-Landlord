@@ -34,6 +34,12 @@ SERIES_ARG_RE = re.compile(r"^(?P<label>[^=]+)=(?P<path>.+)$")
 SERIES_PREFIXES = {
     "approxq",
     "approx_qlearning",
+    "better_approxq",
+    "betterapproxq",
+    "better_approx_qlearning",
+    "approxq_precise",
+    "precise_approxq",
+    "preciseapproxq",
     "approx_doufeature",
     "approxdou",
     "approxdf",
@@ -78,6 +84,29 @@ def checkpoint_elapsed_sec(path: Path):
                 return float(value)
             except (TypeError, ValueError):
                 pass
+    return None
+
+
+def douzero_frame_from_checkpoint(path: Path):
+    #TODO: DouZero checkpoint 文件名中的数字就是训练 frames。
+    match = DOUZERO_CHECKPOINT_RE.match(path.name)
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def checkpoint_frames(path: Path):
+    #TODO: 统一读取真实训练 frames；attention_dou 存在 metadata，DouZero 存在文件名。
+    frame = douzero_frame_from_checkpoint(path)
+    if frame is not None:
+        return float(frame)
+    metadata = checkpoint_metadata(path)
+    value = metadata.get("frames")
+    if value is not None:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            pass
     return None
 
 
@@ -127,9 +156,12 @@ def nearest_douzero_elapsed_sec(path: Path, lookup):
 
 def checkpoint_x_value(episode, path: Path, x_axis: str, time_unit: str,
                        series_start_mtime=None, douzero_time_lookup_data=None):
-    #TODO: 根据横轴模式返回 episode 或训练耗时。
+    #TODO: 根据横轴模式返回 episode、真实 frames 或训练耗时。
     if x_axis == "episode":
         return float(episode)
+    if x_axis == "frames":
+        frames = checkpoint_frames(path)
+        return frames if frames is not None else float(episode)
     elapsed_sec = checkpoint_elapsed_sec(path)
     if elapsed_sec is None:
         elapsed_sec = nearest_douzero_elapsed_sec(path, douzero_time_lookup_data or {})
@@ -142,10 +174,9 @@ def checkpoint_x_value(episode, path: Path, x_axis: str, time_unit: str,
 def douzero_landlord_checkpoints(root: Path, avg_steps_per_episode: float):
     checkpoints = []
     for path in root.rglob("landlord_weights_*.ckpt"):
-        match = DOUZERO_CHECKPOINT_RE.match(path.name)
-        if not match:
+        step = douzero_frame_from_checkpoint(path)
+        if step is None:
             continue
-        step = int(match.group(1))
         episode = step / avg_steps_per_episode
         checkpoints.append((episode, path))
     checkpoints.sort(key=lambda item: item[0])
@@ -161,6 +192,10 @@ def limited_points(points, max_points: int):
 def infer_method_prefix(directory: Path):
     #TODO: 自动判断 series 目录属于旧 ApproxQ 还是 DouZero-feature ApproxQ，减少命令出错。
     parts = set(directory.parts)
+    if "better_approxq" in parts or directory.name.startswith("better_approxq"):
+        return "better_approxq"
+    if "approxq_precise" in parts or directory.name.startswith("approxq_precise"):
+        return "approxq_precise"
     if "approx_doufeature" in parts or directory.name.startswith("approx_doufeature"):
         return "approx_doufeature"
     if "attention_dou" in parts or directory.name.startswith("attention_dou"):
@@ -178,6 +213,10 @@ def infer_method_prefix(directory: Path):
             return "approx_doufeature"
         if algorithm == "attention_dou":
             return "attention_dou"
+        if algorithm in ("better_approxq", "betterapproxq", "better_approx_qlearning"):
+            return "better_approxq"
+        if algorithm in ("approxq_precise", "precise_feature_based_approx_qlearning"):
+            return "approxq_precise"
         if algorithm in ("approxq", "approx_qlearning", "approx_qlearning"):
             return "approxq"
     return "approxq"
@@ -231,6 +270,13 @@ def evaluate_role_win_rate(
         role_to_method = {
             "landlord": "rlcard",
             "landlord_up": "rlcard",
+            "landlord_down": tested_method,
+        }
+        metric = "farmer_win_rate"
+    elif test_role == "two_farmers":
+        role_to_method = {
+            "landlord": "rlcard",
+            "landlord_up": tested_method,
             "landlord_down": tested_method,
         }
         metric = "farmer_win_rate"
@@ -366,14 +412,18 @@ def plot_rows(path: Path, rows, baseline_win_rate: float, test_role: str,
 
     fig, ax = plt.subplots(figsize=(11, 6.5))
     color_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
-    colors = {"rlcard_baseline": "#555555"}
+    colors = {"baseline_50": "#555555"}
     y_label = "Landlord win rate" if test_role == "landlord" else "Farmer win rate"
-    title_role = "Landlord" if test_role == "landlord" else "Farmer"
+    title_role = {
+        "landlord": "Landlord",
+        "farmer": "Single farmer",
+        "two_farmers": "Two farmers",
+    }.get(test_role, test_role)
 
     series_names = [
         name
         for name in dict.fromkeys(row["series"] for row in rows)
-        if name != "rlcard_baseline"
+        if name != "baseline_50"
     ]
     for index, series_name in enumerate(series_names):
         series_rows = [row for row in rows if row["series"] == series_name]
@@ -390,22 +440,24 @@ def plot_rows(path: Path, rows, baseline_win_rate: float, test_role: str,
             color=color,
         )
 
-    model_rows = [row for row in rows if row["series"] != "rlcard_baseline"]
+    model_rows = [row for row in rows if row["series"] != "baseline_50"]
     min_x = min(row.get("x_value", row["episode"]) for row in model_rows)
     max_x = max(row.get("x_value", row["episode"]) for row in model_rows)
     ax.hlines(
         baseline_win_rate,
         min_x,
         max_x,
-        colors=colors["rlcard_baseline"],
+        colors=colors["baseline_50"],
         linestyles="--",
         linewidth=2,
-        label="rlcard baseline",
+        label="50% baseline",
     )
 
-    ax.set_title("{} win-rate trend vs RLCard baseline".format(title_role))
+    ax.set_title("{} win-rate trend vs 50% baseline".format(title_role))
     if x_axis == "time":
         ax.set_xlabel("Training time ({})".format(time_unit))
+    elif x_axis == "frames":
+        ax.set_xlabel("Training frames")
     else:
         ax.set_xlabel(
             "Training episodes (DouZero frames / {:.0f})".format(avg_steps_per_episode)
@@ -438,6 +490,11 @@ def parse_args():
         ),
     )
     parser.add_argument("--douzero_root", type=Path, default=DEFAULT_DOUZERO_ROOT)
+    parser.add_argument(
+        "--skip_douzero",
+        action="store_true",
+        help="Do not evaluate or plot DouZero checkpoints.",
+    )
     parser.add_argument("--eval_data", type=Path, default=DEFAULT_EVAL_DATA)
     parser.add_argument("--output_dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--output_prefix", type=str, default=DEFAULT_OUTPUT_PREFIX)
@@ -447,19 +504,27 @@ def parse_args():
         default=None,
         help=(
             "Optional existing CSV produced by this script. "
-            "douzero and rlcard_baseline rows will be reused instead of re-evaluated."
+            "douzero rows will be reused instead of re-evaluated. "
+            "Baseline rows are ignored because plots use a fixed 50% baseline."
         ),
     )
     parser.add_argument(
         "--test_role",
-        choices=["landlord", "farmer"],
+        choices=["landlord", "farmer", "two_farmers"],
         default="landlord",
         help=(
             "Choose which side to evaluate as the tested model. "
-            "landlord uses landlord win rate; farmer uses farmer win rate."
+            "landlord uses landlord win rate; farmer tests one farmer seat; "
+            "two_farmers tests both farmer seats with the same method."
         ),
     )
     parser.add_argument("--num_workers", type=int, default=5)
+    parser.add_argument(
+        "--num_games",
+        type=int,
+        default=500,
+        help="Number of eval games to use from eval_data; 0 means use all games.",
+    )
     parser.add_argument(
         "--avg_steps_per_episode",
         type=float,
@@ -477,9 +542,9 @@ def parse_args():
     )
     parser.add_argument(
         "--x_axis",
-        choices=["episode", "time"],
+        choices=["episode", "frames", "time"],
         default="episode",
-        help="Use episode/frame-equivalent x-axis or training-time x-axis.",
+        help="Use episode-equivalent, true training frames, or training-time x-axis.",
     )
     parser.add_argument(
         "--time_unit",
@@ -513,9 +578,6 @@ def main():
         args.time_unit,
         douzero_time_lookup_data,
     )
-    reused_baseline_rows = [
-        row for row in reused_rows if row["series"] == "rlcard_baseline"
-    ]
 
     all_model_points = {}
     for label, _, directory in model_series:
@@ -532,25 +594,14 @@ def main():
     eval_data_path = resolve_eval_data_path(str(args.eval_data))
     with open(eval_data_path, "rb") as f:
         card_play_data_list = pickle.load(f)
+    if args.num_games > 0:
+        card_play_data_list = card_play_data_list[:args.num_games]
+    print("Using {} eval games from {}".format(len(card_play_data_list), eval_data_path))
 
     rows = []
-    if reused_baseline_rows:
-        baseline_win_rate = reused_baseline_rows[0]["win_rate"]
-        print(
-            "Reusing RLCard baseline for {} from {}".format(
-                args.test_role, args.reuse_plot_data
-            )
-        )
-    else:
-        print("Evaluating RLCard baseline for {}".format(args.test_role))
-        baseline_win_rate = evaluate_role_win_rate(
-            card_play_data_list,
-            args.test_role,
-            "rlcard",
-            args.num_workers,
-        )
-
-    baseline_series_name = "rlcard_baseline"
+    baseline_win_rate = 0.5
+    baseline_series_name = "baseline_50"
+    print("Using fixed 50% baseline")
 
     for label, method_prefix, directory in model_series:
         append_series_rows(
@@ -565,7 +616,9 @@ def main():
             args.time_unit,
         )
 
-    if reused_douzero_rows:
+    if args.skip_douzero:
+        print("Skipping DouZero series")
+    elif reused_douzero_rows:
         print(
             "Reusing {} DouZero rows from {}".format(
                 len(reused_douzero_rows), args.reuse_plot_data

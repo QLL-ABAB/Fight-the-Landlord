@@ -211,3 +211,75 @@ target = r + gamma * max_a Q(s', a)
 - 观察 buffer 是否降低 checkpoint 间震荡。
 - 观察 baseline 是否能缓解 MC 塌缩。
 - 和老师讨论线性 ApproxQ 的能力边界：继续增强稳定化技巧，还是转向非线性函数逼近。
+
+
+
+## 4. AttentionDou 中 TD 和 MC 的区别
+
+AttentionDou 和 DouZero 一样使用自博弈、actor/learner、buffer 和 batch learning，但把 DouZero 的 LSTM 换成了 multi-head attention。TD 和 MC 的区别主要在训练 target：
+
+```text
+TD:
+  y_t = r_t + gamma * max_a Q(s_{t+1}, a)
+```
+
+TD 是边估计边学习。它不必等整局结束才能给中间动作信号，因此反馈更密集；但 target 依赖当前网络自己的估计，可能有 bootstrapping bias。
+
+```text
+MC:
+  y_t = G
+```
+
+MC 是整局结束后，把最终输赢回报 `G` 回填给这一局中的动作。它的 target 更真实，不依赖下一步 Q 估计；但斗地主回合长、方差大，容易把一局中好动作和坏动作都归为同一个结果。
+
+当前 `mc_adv` 是 MC 的改进版：
+
+```text
+y_t = G - baseline(position)
+```
+
+也就是用“这局结果比该位置平均水平好多少”来更新，能降低 MC 的方差。简单说：TD 更快给信号但可能偏，MC 更接近真实输赢但更抖，MC+baseline 是为了让终局回报训练更稳定。
+
+
+---
+
+这张图主要说明三件事：
+
+1. **大权重特征和高抖动特征不是完全同一批东西**
+   
+   纵轴 Top 权重主要是：
+   `action_finish`、`singles_delta`、`hand_singles`、`badness_delta`、`hand_badness`、`teammate_danger_pass`
+
+   横轴 Top 抖动主要是：
+   `played_control_cards`、`played_group_control_a_2_joker`、`played_mid_cards_ratio`、`played_group_mid_8_to_k`、`played_high_cards_ratio`、以及 `landlord_down:action_finish`
+
+   这说明当前模型里有些特征权重大、真正在决策里被依赖；另一些特征虽然权重不一定最大，但训练中反复被更新、方向不稳。
+
+2. **历史出牌分组特征的抖动和手牌结构价值特征呈明显负相关**
+
+   最强的一批相关关系是负相关，例如：
+
+   - `singles_delta` vs `played_mid_cards_ratio`: `-0.797`
+   - `badness_delta` vs `played_mid_cards_ratio`: `-0.790`
+   - `hand_singles` vs `played_mid_cards_ratio`: `-0.779`
+   - `hand_badness` vs `played_mid_cards_ratio`: `-0.764`
+
+   直觉上可以理解为：模型在“自己手牌结构好坏”和“历史牌面消耗情况”之间来回分摊解释权。也就是说，某些训练窗口里模型更相信手牌结构特征，另一些窗口里又把变化归因到历史出牌比例上，于是历史特征就会抖。
+
+3. **`action_finish` 有角色间联动**
+
+   `landlord:action_finish` 和 `landlord_down:action_finish` 相关为 `0.653`，这是图里少数明显正相关。
+
+   这说明“能否打完/收尾”这个动作特征在不同位置上具有共同训练方向，属于比较稳定、有实际策略含义的信号。它不像历史比例特征那样只是被动解释环境变化。
+
+**对特征改造的启示**
+
+`played_mid_cards_ratio`、`played_group_mid_8_to_k`、`played_control_cards` 这类历史统计特征很可能不是“没用”，而是太粗，容易和 `hand_singles`、`badness_delta`、`singles_delta` 争解释权。
+
+所以后面更适合做的是：
+- 不要简单全删历史特征；
+- 把历史特征改成更条件化的版本，例如按角色、上家/下家、是否地主快没牌、上一手类型、当前动作类型拆开；
+- 对和手牌结构高度负相关的历史特征加约束或裁剪，避免它们反复替代手牌价值特征；
+- `action_finish` 这种跨角色一致的特征可以保留，甚至细分收尾类型。
+
+

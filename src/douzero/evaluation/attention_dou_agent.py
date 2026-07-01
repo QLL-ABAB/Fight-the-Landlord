@@ -1,5 +1,10 @@
 import os
 
+try:
+    import torch
+except ImportError:
+    torch = None
+
 from douzero.rl.attention_dou import (
     DEFAULT_ATTENTION_DOU_DIR,
     DEFAULT_ATTENTION_DOU_PATH,
@@ -57,8 +62,11 @@ class AttentionDouAgent:
         self.name = "AttentionDou"
         self.position = position
         self.model_path = resolve_attention_dou_model_path(model_path)
+        if torch is not None:
+            torch.set_num_threads(int(os.environ.get("ATTENTION_DOU_EVAL_THREADS", "1")))
+        device = os.environ.get("ATTENTION_DOU_EVAL_DEVICE", "cpu")
         self.model = AttentionDouModel.load(
-            self.model_path, device="cpu", load_optimizer=False
+            self.model_path, device=device, load_optimizer=False
         )
 
     #TODO: 用 54 维 token 序列构造所有合法动作并选 Q 最大者。

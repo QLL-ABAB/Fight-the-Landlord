@@ -26,6 +26,10 @@ DEVICE="${DEVICE:-cpu}"
 PROGRESS_INTERVAL="${PROGRESS_INTERVAL:-500}"
 LOG_INTERVAL="${LOG_INTERVAL:-10000}"
 SAVE_INTERVAL="${SAVE_INTERVAL:-50000}"
+FEATURE_DIAG="${FEATURE_DIAG:-0}"
+FEATURE_DIAG_INTERVAL="${FEATURE_DIAG_INTERVAL:-0}"
+FEATURE_DIAG_TOPK="${FEATURE_DIAG_TOPK:-0}"
+FEATURE_DIAG_PATH="${FEATURE_DIAG_PATH:-}"
 
 #note: 可选配置。OUTPUT 指定单个输出文件；RESUME=1 表示从最新 checkpoint 继续。
 OUTPUT="${OUTPUT:-}"
@@ -50,6 +54,7 @@ echo "Time log: ${TIME_LOG}"
 echo "Task=${TASK_NAME} Episodes=${EPISODES} Objective=${OBJECTIVE} RewardScale=${REWARD_SCALE} RewardShaping=${REWARD_SHAPING}"
 echo "Alpha=${ALPHA} Gamma=${GAMMA} Epsilon=${EPSILON} MinEpsilon=${MIN_EPSILON} EpsilonDecay=${EPSILON_DECAY}"
 echo "Device=${DEVICE} FeatureMode=${FEATURE_MODE} MaxCandidateActions=${MAX_CANDIDATE_ACTIONS} ProgressInterval=${PROGRESS_INTERVAL} LogInterval=${LOG_INTERVAL} SaveInterval=${SAVE_INTERVAL}"
+echo "FeatureDiag=${FEATURE_DIAG} FeatureDiagInterval=${FEATURE_DIAG_INTERVAL} FeatureDiagTopK=${FEATURE_DIAG_TOPK} FeatureDiagPath=${FEATURE_DIAG_PATH:-default}"
 
 python - <<'PY'
 try:
@@ -83,10 +88,20 @@ ARGS=(
   --log_interval "${LOG_INTERVAL}"
   --progress_interval "${PROGRESS_INTERVAL}"
   --save_interval "${SAVE_INTERVAL}"
+  --feature_diag_interval "${FEATURE_DIAG_INTERVAL}"
+  --feature_diag_topk "${FEATURE_DIAG_TOPK}"
 )
 
 if [[ "${REWARD_SHAPING}" == "1" || "${REWARD_SHAPING}" == "true" || "${REWARD_SHAPING}" == "yes" ]]; then
   ARGS+=(--reward_shaping)
+fi
+
+if [[ "${FEATURE_DIAG}" == "1" || "${FEATURE_DIAG}" == "true" || "${FEATURE_DIAG}" == "yes" ]]; then
+  ARGS+=(--feature_diag)
+fi
+
+if [[ -n "${FEATURE_DIAG_PATH}" ]]; then
+  ARGS+=(--feature_diag_path "${FEATURE_DIAG_PATH}")
 fi
 
 if [[ -n "${OUTPUT}" ]]; then

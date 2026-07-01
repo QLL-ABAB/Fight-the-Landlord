@@ -39,6 +39,10 @@ CONFIG_OVERRIDE_FIELDS = (
     "log_interval",
     "progress_interval",
     "save_interval",
+    "feature_diag",
+    "feature_diag_path",
+    "feature_diag_interval",
+    "feature_diag_topk",
 )
 
 
@@ -73,6 +77,8 @@ def cli_overrides(args):
         overrides["reward_shaping"] = args.reward_shaping
     if "resume" in provided:
         overrides["resume"] = args.resume
+    if "feature_diag" in provided:
+        overrides["feature_diag"] = args.feature_diag
     return overrides
 
 

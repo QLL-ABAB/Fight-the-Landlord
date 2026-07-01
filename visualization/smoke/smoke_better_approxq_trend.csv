@@ -1,0 +1,5 @@
+series,episode,x_value,win_rate
+baseline_50,2500,2499.0,0.5
+baseline_50,2500,2501.0,0.5
+default,2500,2500.0,0.0
+lr_1e-1,2500,2500.0,0.0
