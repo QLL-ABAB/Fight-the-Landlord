@@ -1,0 +1,402 @@
+{
+  "2500": {
+    "landlord": 0.653,
+    "landlord_up": 0.566,
+    "landlord_down": 0.561
+  },
+  "5000": {
+    "landlord": 0.642,
+    "landlord_up": 0.545,
+    "landlord_down": 0.491
+  },
+  "7500": {
+    "landlord": 0.589,
+    "landlord_up": 0.541,
+    "landlord_down": 0.499
+  },
+  "10000": {
+    "landlord": 0.609,
+    "landlord_up": 0.56,
+    "landlord_down": 0.465
+  },
+  "12500": {
+    "landlord": 0.639,
+    "landlord_up": 0.515,
+    "landlord_down": 0.531
+  },
+  "15000": {
+    "landlord": 0.663,
+    "landlord_up": 0.515,
+    "landlord_down": 0.569
+  },
+  "17500": {
+    "landlord": 0.557,
+    "landlord_up": 0.503,
+    "landlord_down": 0.533
+  },
+  "20000": {
+    "landlord": 0.635,
+    "landlord_up": 0.499,
+    "landlord_down": 0.555
+  },
+  "22500": {
+    "landlord": 0.589,
+    "landlord_up": 0.507,
+    "landlord_down": 0.551
+  },
+  "25000": {
+    "landlord": 0.635,
+    "landlord_up": 0.521,
+    "landlord_down": 0.522
+  },
+  "27500": {
+    "landlord": 0.464,
+    "landlord_up": 0.544,
+    "landlord_down": 0.56
+  },
+  "30000": {
+    "landlord": 0.633,
+    "landlord_up": 0.558,
+    "landlord_down": 0.569
+  },
+  "32500": {
+    "landlord": 0.603,
+    "landlord_up": 0.525,
+    "landlord_down": 0.572
+  },
+  "35000": {
+    "landlord": 0.64,
+    "landlord_up": 0.545,
+    "landlord_down": 0.505
+  },
+  "37500": {
+    "landlord": 0.675,
+    "landlord_up": 0.572,
+    "landlord_down": 0.547
+  },
+  "40000": {
+    "landlord": 0.648,
+    "landlord_up": 0.529,
+    "landlord_down": 0.523
+  },
+  "42500": {
+    "landlord": 0.704,
+    "landlord_up": 0.558,
+    "landlord_down": 0.501
+  },
+  "45000": {
+    "landlord": 0.654,
+    "landlord_up": 0.499,
+    "landlord_down": 0.514
+  },
+  "47500": {
+    "landlord": 0.683,
+    "landlord_up": 0.569,
+    "landlord_down": 0.532
+  },
+  "50000": {
+    "landlord": 0.685,
+    "landlord_up": 0.518,
+    "landlord_down": 0.544
+  },
+  "52500": {
+    "landlord": 0.65,
+    "landlord_up": 0.56,
+    "landlord_down": 0.533
+  },
+  "55000": {
+    "landlord": 0.667,
+    "landlord_up": 0.505,
+    "landlord_down": 0.57
+  },
+  "57500": {
+    "landlord": 0.633,
+    "landlord_up": 0.511,
+    "landlord_down": 0.56
+  },
+  "60000": {
+    "landlord": 0.671,
+    "landlord_up": 0.504,
+    "landlord_down": 0.556
+  },
+  "62500": {
+    "landlord": 0.694,
+    "landlord_up": 0.581,
+    "landlord_down": 0.55
+  },
+  "65000": {
+    "landlord": 0.663,
+    "landlord_up": 0.566,
+    "landlord_down": 0.555
+  },
+  "67500": {
+    "landlord": 0.67,
+    "landlord_up": 0.534,
+    "landlord_down": 0.517
+  },
+  "70000": {
+    "landlord": 0.633,
+    "landlord_up": 0.59,
+    "landlord_down": 0.556
+  },
+  "72500": {
+    "landlord": 0.637,
+    "landlord_up": 0.558,
+    "landlord_down": 0.564
+  },
+  "75000": {
+    "landlord": 0.578,
+    "landlord_up": 0.596,
+    "landlord_down": 0.562
+  },
+  "77500": {
+    "landlord": 0.657,
+    "landlord_up": 0.584,
+    "landlord_down": 0.54
+  },
+  "80000": {
+    "landlord": 0.665,
+    "landlord_up": 0.63,
+    "landlord_down": 0.572
+  },
+  "82500": {
+    "landlord": 0.558,
+    "landlord_up": 0.61,
+    "landlord_down": 0.553
+  },
+  "85000": {
+    "landlord": 0.607,
+    "landlord_up": 0.65,
+    "landlord_down": 0.575
+  },
+  "87500": {
+    "landlord": 0.601,
+    "landlord_up": 0.653,
+    "landlord_down": 0.473
+  },
+  "90000": {
+    "landlord": 0.516,
+    "landlord_up": 0.652,
+    "landlord_down": 0.571
+  },
+  "92500": {
+    "landlord": 0.642,
+    "landlord_up": 0.599,
+    "landlord_down": 0.57
+  },
+  "95000": {
+    "landlord": 0.629,
+    "landlord_up": 0.594,
+    "landlord_down": 0.553
+  },
+  "97500": {
+    "landlord": 0.633,
+    "landlord_up": 0.585,
+    "landlord_down": 0.553
+  },
+  "100000": {
+    "landlord": 0.617,
+    "landlord_up": 0.609,
+    "landlord_down": 0.54
+  },
+  "102500": {
+    "landlord": 0.636,
+    "landlord_up": 0.515,
+    "landlord_down": 0.578
+  },
+  "105000": {
+    "landlord": 0.653,
+    "landlord_up": 0.499,
+    "landlord_down": 0.576
+  },
+  "107500": {
+    "landlord": 0.656,
+    "landlord_up": 0.634,
+    "landlord_down": 0.536
+  },
+  "110000": {
+    "landlord": 0.662,
+    "landlord_up": 0.629,
+    "landlord_down": 0.529
+  },
+  "112500": {
+    "landlord": 0.591,
+    "landlord_up": 0.658,
+    "landlord_down": 0.558
+  },
+  "115000": {
+    "landlord": 0.641,
+    "landlord_up": 0.631,
+    "landlord_down": 0.537
+  },
+  "117500": {
+    "landlord": 0.557,
+    "landlord_up": 0.647,
+    "landlord_down": 0.572
+  },
+  "120000": {
+    "landlord": 0.655,
+    "landlord_up": 0.645,
+    "landlord_down": 0.585
+  },
+  "122500": {
+    "landlord": 0.636,
+    "landlord_up": 0.556,
+    "landlord_down": 0.595
+  },
+  "125000": {
+    "landlord": 0.644,
+    "landlord_up": 0.634,
+    "landlord_down": 0.531
+  },
+  "127500": {
+    "landlord": 0.671,
+    "landlord_up": 0.629,
+    "landlord_down": 0.569
+  },
+  "130000": {
+    "landlord": 0.637,
+    "landlord_up": 0.609,
+    "landlord_down": 0.577
+  },
+  "132500": {
+    "landlord": 0.661,
+    "landlord_up": 0.636,
+    "landlord_down": 0.539
+  },
+  "135000": {
+    "landlord": 0.669,
+    "landlord_up": 0.589,
+    "landlord_down": 0.572
+  },
+  "137500": {
+    "landlord": 0.624,
+    "landlord_up": 0.594,
+    "landlord_down": 0.52
+  },
+  "140000": {
+    "landlord": 0.626,
+    "landlord_up": 0.642,
+    "landlord_down": 0.543
+  },
+  "142500": {
+    "landlord": 0.617,
+    "landlord_up": 0.526,
+    "landlord_down": 0.524
+  },
+  "145000": {
+    "landlord": 0.655,
+    "landlord_up": 0.516,
+    "landlord_down": 0.531
+  },
+  "147500": {
+    "landlord": 0.668,
+    "landlord_up": 0.652,
+    "landlord_down": 0.486
+  },
+  "150000": {
+    "landlord": 0.652,
+    "landlord_up": 0.572,
+    "landlord_down": 0.508
+  },
+  "152500": {
+    "landlord": 0.654,
+    "landlord_up": 0.526,
+    "landlord_down": 0.494
+  },
+  "155000": {
+    "landlord": 0.617,
+    "landlord_up": 0.535,
+    "landlord_down": 0.474
+  },
+  "157500": {
+    "landlord": 0.638,
+    "landlord_up": 0.541,
+    "landlord_down": 0.529
+  },
+  "160000": {
+    "landlord": 0.644,
+    "landlord_up": 0.632,
+    "landlord_down": 0.498
+  },
+  "162500": {
+    "landlord": 0.629,
+    "landlord_up": 0.621,
+    "landlord_down": 0.473
+  },
+  "165000": {
+    "landlord": 0.643,
+    "landlord_up": 0.607,
+    "landlord_down": 0.521
+  },
+  "167500": {
+    "landlord": 0.646,
+    "landlord_up": 0.548,
+    "landlord_down": 0.484
+  },
+  "170000": {
+    "landlord": 0.687,
+    "landlord_up": 0.558,
+    "landlord_down": 0.503
+  },
+  "172500": {
+    "landlord": 0.669,
+    "landlord_up": 0.538,
+    "landlord_down": 0.523
+  },
+  "175000": {
+    "landlord": 0.69,
+    "landlord_up": 0.55,
+    "landlord_down": 0.514
+  },
+  "177500": {
+    "landlord": 0.675,
+    "landlord_up": 0.562,
+    "landlord_down": 0.504
+  },
+  "180000": {
+    "landlord": 0.681,
+    "landlord_up": 0.626,
+    "landlord_down": 0.449
+  },
+  "182500": {
+    "landlord": 0.686,
+    "landlord_up": 0.659,
+    "landlord_down": 0.542
+  },
+  "185000": {
+    "landlord": 0.671,
+    "landlord_up": 0.624,
+    "landlord_down": 0.484
+  },
+  "187500": {
+    "landlord": 0.658,
+    "landlord_up": 0.647,
+    "landlord_down": 0.551
+  },
+  "190000": {
+    "landlord": 0.641,
+    "landlord_up": 0.659,
+    "landlord_down": 0.55
+  },
+  "192500": {
+    "landlord": 0.666,
+    "landlord_up": 0.567,
+    "landlord_down": 0.554
+  },
+  "195000": {
+    "landlord": 0.676,
+    "landlord_up": 0.675,
+    "landlord_down": 0.558
+  },
+  "197500": {
+    "landlord": 0.644,
+    "landlord_up": 0.63,
+    "landlord_down": 0.563
+  },
+  "200000": {
+    "landlord": 0.66,
+    "landlord_up": 0.616,
+    "landlord_down": 0.566
+  }
+}

@@ -1,11 +1,21 @@
 import os
 
-from douzero.rl.approx_qlearning import (
-    DEFAULT_APPROX_Q_PATH,
-    ApproxQModel,
-    features_for_actions,
-    prune_legal_actions,
-)
+try:
+    from douzero.rl.approx_qlearning import (
+        DEFAULT_APPROX_Q_PATH,
+        ApproxQModel,
+        features_for_actions,
+        prune_legal_actions,
+    )
+except ModuleNotFoundError as exc:
+    if exc.name != "douzero.rl.approx_qlearning":
+        raise
+    from douzero.rl.approx_qlearning_fasle import (
+        DEFAULT_APPROX_Q_PATH,
+        ApproxQModel,
+        features_for_actions,
+        prune_legal_actions,
+    )
 
 
 DEFAULT_APPROX_Q_DIR = "approx_qlearning_checkpoints/approx_qlearning"

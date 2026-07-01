@@ -1,0 +1,79 @@
+﻿
+\leftmargini 2em
+\leftmarginii 2em
+\leftmarginiii 1em 
+\leftmarginiv 0.5em
+\leftmarginv 0.5em 
+\leftmarginvi 0.5em
+
+\leftmargin\leftmargini
+\labelsep 5pt
+\labelwidth\leftmargini\advance\labelwidth-\labelsep
+
+\def\@listI{\leftmargin\leftmargini 
+\parsep 2pt plus 1pt minus 0.5pt%
+\topsep 4pt plus 1pt minus 2pt%
+\itemsep 2pt plus 1pt minus 0.5pt%
+\partopsep 1pt plus 0.5pt minus 0.5pt}
+
+\let\@listi\@listI
+\@listi 
+
+\def\@listii{\leftmargin\leftmarginii
+   \labelwidth\leftmarginii\advance\labelwidth-\labelsep
+   \parsep 1pt plus 0.5pt minus 0.5pt
+   \topsep 2pt plus 1pt minus 0.5pt
+   \itemsep \parsep}
+\def\@listiii{\leftmargin\leftmarginiii
+    \labelwidth\leftmarginiii\advance\labelwidth-\labelsep
+    \parsep 0pt plus 1pt
+    \partopsep 0.5pt plus 0pt minus 0.5pt
+    \topsep 1pt plus 0.5pt minus 0.5pt 
+    \itemsep \topsep}
+\def\@listiv{\leftmargin\leftmarginiv
+     \labelwidth\leftmarginiv\advance\labelwidth-\labelsep}
+\def\@listv{\leftmargin\leftmarginv
+     \labelwidth\leftmarginv\advance\labelwidth-\labelsep}
+\def\@listvi{\leftmargin\leftmarginvi
+     \labelwidth\leftmarginvi\advance\labelwidth-\labelsep}
+
+
+
+\typeout{Named Citation Style, version of 30 November 1994}
+
+
+
+
+
+
+\def\leftcite{\@up[}\def\rightcite{\@up]}
+
+\def\cite{\def\citeauthoryear##1##2{\def\@thisauthor{##1}%
+             \ifx \@lastauthor \@thisauthor \relax \else##1, \fi ##2}\@icite}
+\def\shortcite{\def\citeauthoryear##1##2{##2}\@icite}
+
+\def\citeauthor{\def\citeauthoryear##1##2{##1}\@nbcite}
+\def\citeyear{\def\citeauthoryear##1##2{##2}\@nbcite}
+
+\def\@icite{\leavevmode\def\@citeseppen{-1000}%
+ \def\@cite##1##2{\leftcite\nobreak\hskip 0in{##1\if@tempswa , ##2\fi}\rightcite}%
+ \@ifnextchar [{\@tempswatrue\@citex}{\@tempswafalse\@citex[]}}
+\def\@nbcite{\leavevmode\def\@citeseppen{1000}%
+ \def\@cite##1##2{{##1\if@tempswa , ##2\fi}}%
+ \@ifnextchar [{\@tempswatrue\@citex}{\@tempswafalse\@citex[]}}
+
+\def\@citex[#1]#2{%
+  \def\@lastauthor{}\def\@citea{}%
+  \@cite{\@for\@citeb:=#2\do
+    {\@citea\def\@citea{;\penalty\@citeseppen\ }%
+     \if@filesw\immediate\write\@auxout{\string\citation{\@citeb}}\fi
+     \@ifundefined{b@\@citeb}{\def\@thisauthor{}{\bf ?}\@warning
+       {Citation `\@citeb' on page \thepage \space undefined}}%
+     {\csname b@\@citeb\endcsname}\let\@lastauthor\@thisauthor}}{#1}}
+
+\def\@biblabel#1{\def\citeauthoryear##1##2{##1, ##2}\@up{[}#1\@up{]}\hfill}
+
+\def\@up#1{\leavevmode\raise.2ex\hbox{#1}}
+
+
+

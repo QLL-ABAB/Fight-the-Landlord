@@ -1,0 +1,20 @@
+{
+  "created_at": "2026-06-27 02:19:25",
+  "num_policy_states": 7566,
+  "num_values": 7569,
+  "stats": {
+    "deals": 3000,
+    "expanded_roots": 368,
+    "feature_policy": 7566,
+    "feature_values": 7569,
+    "iterations": 11,
+    "last_delta": 0.0,
+    "plans": 1,
+    "roles": "all",
+    "sampled_roots": 9000,
+    "state_mode": "feature",
+    "states": 500000,
+    "truncated": true
+  },
+  "table_type": "global"
+}

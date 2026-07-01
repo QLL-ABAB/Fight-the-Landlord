@@ -129,6 +129,76 @@ def _adversarial(position: str, arg: str | None):
     return agent
 
 
+def _adversarial_mc(position: str, arg: str | None):
+    from douzero.evaluation.adversarial_mc_agent import AdversarialSearchAgent
+
+    agent = AdversarialSearchAgent(position)
+    if arg:
+        parts = [x.strip() for x in arg.split(":") if x.strip()]
+        if len(parts) >= 1 and parts[0].isdigit():
+            agent.cfg["num_samples"] = int(parts[0])
+        if len(parts) >= 2 and parts[1].isdigit():
+            agent.cfg["search_depth"] = int(parts[1])
+        if len(parts) >= 3:
+            try:
+                agent.cfg["time_budget_sec"] = float(parts[2])
+            except ValueError:
+                pass
+    return agent
+
+
+def _adversarial_q(position: str, arg: str | None):
+    from douzero.evaluation.adversarial_q_agent import AdversarialQSearchAgent
+
+    model_path = None
+    num_samples = None
+    search_depth = None
+    time_budget = None
+    q_leaf_mix = None
+    q_leaf_scale = None
+
+    if arg:
+        parts = [x.strip() for x in arg.split(":") if x.strip()]
+        if len(parts) >= 2 and len(parts[0]) == 1 and (
+            parts[1].startswith("\\") or parts[1].startswith("/")
+        ):
+            parts = [parts[0] + ":" + parts[1]] + parts[2:]
+        if parts:
+            model_path = parts[0]
+        if len(parts) >= 2 and parts[1].isdigit():
+            num_samples = int(parts[1])
+        if len(parts) >= 3 and parts[2].isdigit():
+            search_depth = int(parts[2])
+        if len(parts) >= 4:
+            try:
+                time_budget = float(parts[3])
+            except ValueError:
+                pass
+        if len(parts) >= 5:
+            try:
+                q_leaf_mix = float(parts[4])
+            except ValueError:
+                pass
+        if len(parts) >= 6:
+            try:
+                q_leaf_scale = float(parts[5])
+            except ValueError:
+                pass
+
+    agent = AdversarialQSearchAgent(position, model_path=model_path)
+    if num_samples is not None:
+        agent.cfg["num_samples"] = num_samples
+    if search_depth is not None:
+        agent.cfg["search_depth"] = search_depth
+    if time_budget is not None:
+        agent.cfg["time_budget_sec"] = time_budget
+    if q_leaf_mix is not None:
+        agent.cfg["q_leaf_mix"] = q_leaf_mix
+    if q_leaf_scale is not None:
+        agent.cfg["q_leaf_scale"] = q_leaf_scale
+    return agent
+
+
 def _qlearning(position: str, model_path: str | None):
     from douzero.evaluation.qlearning_agent import QLearningAgent
 
@@ -160,6 +230,12 @@ def _approx_doufeature(position: str, model_path: str | None):
     return ApproxDouFeatureAgent(position, model_path)
 
 
+def _attention_dou(position: str, model_path: str | None):
+    from douzero.evaluation.attention_dou_agent import AttentionDouAgent
+
+    return AttentionDouAgent(position, model_path)
+
+
 def _search(_: str, arg: str | None):
     from douzero.evaluation.search_agent import SearchAgent
 
@@ -178,6 +254,24 @@ def _expectimax(_: str, arg: str | None):
         return ExpectimaxAgent(int(parts[0]))
     return ExpectimaxAgent()
 
+def _nnpolicy(position: str, arg: str | None):
+    from douzero.evaluation.nn_policy_agent import NeuralPolicyAgent
+
+    # 使用方式：
+    # nnpolicy:selfplay_policy_weights/weights.json
+    weights_path = arg if arg else None
+
+    return NeuralPolicyAgent(
+        position=position,
+        weights_path=weights_path,
+        concrete=False,
+    )
+
+def _montecarlo(position: str, arg: str | None):
+    from douzero.evaluation.high_rank_montecarlo_agent import HighRankMonteCarloAgent
+
+    return HighRankMonteCarloAgent(position)
+
 
 def _douzero(position: str, model_path: str | None):
     from douzero.evaluation.deep_agent import DeepAgent
@@ -186,6 +280,36 @@ def _douzero(position: str, model_path: str | None):
     if not model_path:
         raise ValueError("DouZero method requires douzero:/path/to/checkpoint.ckpt")
     return DeepAgent(position, resolve_douzero_model_path(position, model_path))
+
+
+# ---------- 新增 mcts 支持 ----------
+def _mcts(position: str, arg: str | None):
+    from douzero.evaluation.mcts_agent import MCTSAgent
+
+    num_simulations = 200
+    c = 1.414
+    time_budget = 0.3
+    if arg:
+        parts = [x.strip() for x in arg.split(":") if x.strip()]
+        if len(parts) >= 1 and parts[0].isdigit():
+            num_simulations = int(parts[0])
+        if len(parts) >= 2:
+            try:
+                c = float(parts[1])
+            except ValueError:
+                pass
+        if len(parts) >= 3:
+            try:
+                time_budget = float(parts[2])
+            except ValueError:
+                pass
+    return MCTSAgent(
+        position=position,
+        num_simulations=num_simulations,
+        c=c,
+        time_budget=time_budget
+    )
+# -----------------------------------
 
 
 AGENT_SPECS = (
@@ -205,6 +329,18 @@ AGENT_SPECS = (
         _adversarial,
         description="Bayesian sampled adversarial-search agent",
     ),
+    AgentSpec(
+        "adversarial_mc",
+        ("advmc", "adv_mc"),
+        _adversarial_mc,
+        description="Adversarial search with integrated high-rank Monte Carlo leaf evaluator",
+    ),
+    AgentSpec(
+        "adversarial_q",
+        ("advq", "adv_q"),
+        _adversarial_q,
+        description="Adversarial search with attention_dou Q-network leaf evaluator",
+    ),
     AgentSpec("qlearning", (), _qlearning, description="Tabular Q-learning agent"),
     AgentSpec(
         "approxq",
@@ -217,6 +353,18 @@ AGENT_SPECS = (
         ("approxdou", "approxdf"),
         _approx_doufeature,
         description="Linear ApproxQ with original DouZero x/z features",
+    ),
+    AgentSpec(
+        "attention_dou",
+        ("attentiondou", "attndou", "attn_dou"),
+        _attention_dou,
+        description="Multi-head attention Q-network on DouZero 54-dim tokens",
+    ),
+    AgentSpec(
+        "nnpolicy",
+        ("nn", "neural", "policy"),
+        _nnpolicy,
+        description="Self-play neural policy-gradient action scorer",
     ),
     AgentSpec(
         "policy_gradient",
@@ -238,6 +386,19 @@ AGENT_SPECS = (
         _expectimax,
         needs_position=False,
         description="Expectimax search agent",
+    ),
+    AgentSpec(
+        "montecarlo",
+        ("mc", "highrankmc"),
+        _montecarlo,
+        description="High-rank Monte Carlo agent (translated from Botzone C++)",
+    ),
+    # 新增 mcts 规格
+    AgentSpec(
+        "mcts",
+        ("mcts_agent",),
+        _mcts,
+        description="MCTS agent with position-dependent aggression (landlord aggressive, farmers conservative)",
     ),
 )
 

@@ -7,6 +7,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 APPROXQ_SAVEDIR = "approx_qlearning_checkpoints/approx_qlearning"
 APPROX_DOUFEATURE_SAVEDIR = "approx_qlearning_checkpoints/approx_doufeature"
+ATTENTION_DOU_SAVEDIR = "attention_dou_checkpoints/attention_dou"
 APPROXQ_1M_HISTORY_DIR = Path(APPROXQ_SAVEDIR) / "approxq_logadp_cmp_1m_history"
 APPROXQ_1M_HISTORY_BEST_LANDLORD = APPROXQ_1M_HISTORY_DIR / "750000.pkl"
 
@@ -57,7 +58,44 @@ class ApproxDouFeatureTrainConfig(ApproxQTrainConfig):
     update_mode: str = "td"
     num_workers: int = 4
     worker_episodes: int = 8
+    buffer_size: int = 0
+    learn_batch_size: int = 4096
+    learn_steps: int = 1
+    baseline_beta: float = 0.01
     diag_topk: int = 20
+
+
+@dataclass(frozen=True)
+class AttentionDouTrainConfig(ApproxQTrainConfig):
+    algorithm: str = "attention_dou"
+    episodes: int = 100000
+    savedir: str = ATTENTION_DOU_SAVEDIR
+    device: str = "auto"
+    actor_device: str = "auto"
+    feature_mode: str = "attention_dou"
+    max_candidate_actions: int = 0
+    log_interval: int = 1000
+    progress_interval: int = 500
+
+    update_mode: str = "td"
+    learning_rate: float = 0.0003
+    weight_decay: float = 0.00001
+    max_grad_norm: float = 10.0
+    rmsprop_alpha: float = 0.99
+    momentum: float = 0.0
+    optimizer_eps: float = 0.00001
+    hidden_dim: int = 128
+    num_heads: int = 4
+    num_layers: int = 2
+    dropout: float = 0.0
+    num_workers: int = 4
+    num_threads: int = 1
+    unroll_length: int = 20
+    num_buffers: int = 64
+    buffer_size: int = 0
+    learn_batch_size: int = 4
+    learn_steps: int = 1
+    baseline_beta: float = 0.01
 
 
 APPROXQ_TRAIN_CONFIGS = {
@@ -116,7 +154,6 @@ APPROX_DOUFEATURE_TRAIN_CONFIGS = {
         gamma=0.98,
         reward_shaping=False,
         num_workers=4,
-        worker_episodes=8,
         log_interval=10000,
         progress_interval=5000,
         save_interval=50000,
@@ -129,7 +166,21 @@ APPROX_DOUFEATURE_TRAIN_CONFIGS = {
         gamma=1,
         reward_shaping=False,
         num_workers=4,
-        worker_episodes=8,
+        log_interval=10000,
+        progress_interval=5000,
+        save_interval=50000,
+    ),
+    "approx_doufeature_logadp_td_buffer_1m": ApproxDouFeatureTrainConfig(
+        name="approx_doufeature_logadp_td_buffer_1m",
+        update_mode="td",
+        episodes=1000000,
+        alpha=0.003,
+        gamma=1,
+        reward_shaping=False,
+        num_workers=4,
+        buffer_size=200000,
+        learn_batch_size=4096,
+        learn_steps=10,
         log_interval=10000,
         progress_interval=5000,
         save_interval=50000,
@@ -142,7 +193,80 @@ APPROX_DOUFEATURE_TRAIN_CONFIGS = {
         gamma=1,
         reward_shaping=False,
         num_workers=4,
-        worker_episodes=8,
+        log_interval=10000,
+        progress_interval=5000,
+        save_interval=50000,
+    ),
+    "approx_doufeature_logadp_mc_adv_buffer_1m": ApproxDouFeatureTrainConfig(
+        name="approx_doufeature_logadp_mc_adv_buffer_1m",
+        update_mode="mc_adv",
+        episodes=1000000,
+        alpha=0.001,
+        gamma=1,
+        reward_shaping=False,
+        num_workers=4,
+        buffer_size=200000,
+        learn_batch_size=4096,
+        learn_steps=10,
+        baseline_beta=0.01,
+        log_interval=10000,
+        progress_interval=5000,
+        save_interval=50000,
+    ),
+}
+
+
+ATTENTION_DOU_TRAIN_CONFIGS = {
+    "attention_dou_logadp_td_1m": AttentionDouTrainConfig(
+        name="attention_dou_logadp_td_1m",
+        update_mode="td",
+        episodes=1000000,
+        learning_rate=0.0003,
+        gamma=1,
+        reward_shaping=False,
+        num_workers=4,
+        num_threads=1,
+        unroll_length=20,
+        num_buffers=64,
+        learn_batch_size=4,
+        learn_steps=1,
+        log_interval=10000,
+        progress_interval=5000,
+        save_interval=50000,
+    ),
+    "attention_dou_logadp_td_buffer_1m": AttentionDouTrainConfig(
+        name="attention_dou_logadp_td_buffer_1m",
+        update_mode="td",
+        episodes=1000000,
+        learning_rate=0.0001,
+        gamma=1,
+        reward_shaping=False,
+        num_workers=4,
+        num_threads=1,
+        unroll_length=20,
+        num_buffers=64,
+        buffer_size=0,
+        learn_batch_size=4,
+        learn_steps=1,
+        log_interval=10000,
+        progress_interval=5000,
+        save_interval=50000,
+    ),
+    "attention_dou_logadp_mc_adv_buffer_1m": AttentionDouTrainConfig(
+        name="attention_dou_logadp_mc_adv_buffer_1m",
+        update_mode="mc_adv",
+        episodes=1000000,
+        learning_rate=0.0001,
+        gamma=1,
+        reward_shaping=False,
+        num_workers=4,
+        num_threads=1,
+        unroll_length=20,
+        num_buffers=64,
+        buffer_size=0,
+        learn_batch_size=4,
+        learn_steps=1,
+        baseline_beta=0.01,
         log_interval=10000,
         progress_interval=5000,
         save_interval=50000,
@@ -153,6 +277,7 @@ APPROX_DOUFEATURE_TRAIN_CONFIGS = {
 TRAIN_CONFIGS = {
     **APPROXQ_TRAIN_CONFIGS,
     **APPROX_DOUFEATURE_TRAIN_CONFIGS,
+    **ATTENTION_DOU_TRAIN_CONFIGS,
 }
 
 
@@ -195,33 +320,82 @@ def apply_train_config_to_args(args, config: ApproxQTrainConfig):
 
 
 def config_summary(config: ApproxQTrainConfig) -> str:
-    common = (
-        "{} [{}] -> episodes={}, alpha={}, gamma={}, objective={}, "
-        "reward_scale={}, reward_shaping={}, device={}, feature_mode={}, "
-        "max_candidate_actions={}, log_interval={}, progress_interval={}, "
-        "save_interval={}".format(
-            config.name,
-            config.algorithm,
-            config.episodes,
-            config.alpha,
-            config.gamma,
-            config.objective,
-            config.reward_scale,
-            config.reward_shaping,
-            config.device,
-            config.feature_mode,
-            config.max_candidate_actions,
-            config.log_interval,
-            config.progress_interval,
-            config.save_interval,
+    if isinstance(config, AttentionDouTrainConfig):
+        common = (
+            "{} [{}] -> episodes={}, gamma={}, objective={}, "
+            "reward_scale={}, reward_shaping={}, device={}, actor_device={}, log_interval={}, "
+            "progress_interval={}, save_interval={}".format(
+                config.name,
+                config.algorithm,
+                config.episodes,
+                config.gamma,
+                config.objective,
+                config.reward_scale,
+                config.reward_shaping,
+                config.device,
+                config.actor_device,
+                config.log_interval,
+                config.progress_interval,
+                config.save_interval,
+            )
         )
-    )
-    if isinstance(config, ApproxDouFeatureTrainConfig):
+    else:
+        common = (
+            "{} [{}] -> episodes={}, alpha={}, gamma={}, objective={}, "
+            "reward_scale={}, reward_shaping={}, device={}, feature_mode={}, "
+            "max_candidate_actions={}, log_interval={}, progress_interval={}, "
+            "save_interval={}".format(
+                config.name,
+                config.algorithm,
+                config.episodes,
+                config.alpha,
+                config.gamma,
+                config.objective,
+                config.reward_scale,
+                config.reward_shaping,
+                config.device,
+                config.feature_mode,
+                config.max_candidate_actions,
+                config.log_interval,
+                config.progress_interval,
+                config.save_interval,
+            )
+        )
+    if isinstance(config, AttentionDouTrainConfig):
         common += (
-            ", update_mode={}, num_workers={}, worker_episodes={}, diag_topk={}".format(
+            ", update_mode={}, learning_rate={}, hidden_dim={}, "
+            "num_heads={}, num_layers={}, dropout={}, num_workers={}, num_threads={}, "
+            "unroll_length={}, num_buffers={}, "
+            "buffer_size={}, learn_batch_size={}, "
+            "learn_steps={}, baseline_beta={}".format(
+                config.update_mode,
+                config.learning_rate,
+                config.hidden_dim,
+                config.num_heads,
+                config.num_layers,
+                config.dropout,
+                config.num_workers,
+                config.num_threads,
+                config.unroll_length,
+                config.num_buffers,
+                config.buffer_size,
+                config.learn_batch_size,
+                config.learn_steps,
+                config.baseline_beta,
+            )
+        )
+    elif isinstance(config, ApproxDouFeatureTrainConfig):
+        common += (
+            ", update_mode={}, num_workers={}, worker_episodes={}, "
+            "buffer_size={}, learn_batch_size={}, learn_steps={}, "
+            "baseline_beta={}, diag_topk={}".format(
                 config.update_mode,
                 config.num_workers,
                 config.worker_episodes,
+                config.buffer_size,
+                config.learn_batch_size,
+                config.learn_steps,
+                config.baseline_beta,
                 config.diag_topk,
             )
         )

@@ -1,0 +1,19 @@
+{
+  "deals": 3000,
+  "gamma": 1.0,
+  "max_actions_per_state": 120,
+  "max_iterations": 200,
+  "max_states": 50000,
+  "max_states_per_root": 5000,
+  "max_wing_combinations": 16,
+  "out_dir": "value_iteration_tables",
+  "pass_reward": -1.0,
+  "progress_every": 20,
+  "roles": "all",
+  "run_name": "vi_3k_500k_v2",
+  "seed": 1,
+  "step_reward": -1.0,
+  "terminal_reward": 100.0,
+  "theta": 1e-06,
+  "vi_progress_every": 5
+}
